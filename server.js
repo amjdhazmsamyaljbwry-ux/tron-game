@@ -22,29 +22,17 @@ const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, path: '/ws' });
 
 /** @type {Map<string, Room>} */
 const rooms = new Map();
-
-function makeCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-  let code;
-  do {
-    code = Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-  } while (rooms.has(code));
-  return code;
-}
 
 function send(ws, msg) {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
 }
 
-function broadcast(room, msg, exceptId) {
-  for (const p of room.players.values()) {
-    if (p.id === exceptId) continue;
-    send(p.ws, msg);
-  }
+function broadcast(room, msg) {
+  for (const p of room.players.values()) send(p.ws, msg);
 }
 
 function lobbyPayload(room) {
@@ -131,9 +119,7 @@ function tick(room) {
   for (const p of alivePlayers) {
     if (p.nextDir && OPPOSITE[p.nextDir] !== p.dir) p.dir = p.nextDir;
     const d = DIRS[p.dir];
-    const nx = p.x + d.x;
-    const ny = p.y + d.y;
-    nextHeads.set(p.id, { nx, ny });
+    nextHeads.set(p.id, { nx: p.x + d.x, ny: p.y + d.y });
   }
 
   const headCellCounts = new Map();
@@ -189,7 +175,6 @@ function removePlayer(ws) {
   }
 
   if (room.status === 'playing') {
-    const p = room.players.get(playerId);
     const stillAlive = [...room.players.values()].filter((pl) => pl.alive);
     if (stillAlive.length <= 1) {
       endRound(room, stillAlive[0] || null);
@@ -199,7 +184,65 @@ function removePlayer(ws) {
   broadcast(room, lobbyPayload(room));
 }
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  const url = new URL(req.url, 'http://x');
+  const action = url.searchParams.get('action');
+  const code = (url.searchParams.get('code') || '').toUpperCase();
+  const name = (url.searchParams.get('name') || 'لاعب').slice(0, 12);
+
+  if (!/^[A-Z]{4}$/.test(code) || (action !== 'create' && action !== 'join')) {
+    send(ws, { type: 'error', code: 'BAD_REQUEST', message: 'طلب غير صالح' });
+    ws.close();
+    return;
+  }
+
+  if (action === 'create') {
+    if (rooms.has(code)) {
+      send(ws, { type: 'error', code: 'CODE_TAKEN', message: 'الرمز مستخدم بالفعل' });
+      ws.close();
+      return;
+    }
+    const room = { code, hostId: null, players: new Map(), status: 'lobby', interval: null, trailSet: new Set() };
+    rooms.set(code, room);
+
+    const playerId = Math.random().toString(36).slice(2, 10);
+    const color = COLORS[0];
+    room.players.set(playerId, { id: playerId, name, color, ws, alive: true });
+    room.hostId = playerId;
+    ws.roomCode = code;
+    ws.playerId = playerId;
+
+    send(ws, { type: 'created', code, playerId, color });
+    broadcast(room, lobbyPayload(room));
+  } else {
+    const room = rooms.get(code);
+    if (!room) {
+      send(ws, { type: 'error', code: 'NOT_FOUND', message: 'الغرفة غير موجودة' });
+      ws.close();
+      return;
+    }
+    if (room.status === 'playing') {
+      send(ws, { type: 'error', code: 'IN_PROGRESS', message: 'اللعبة بدأت بالفعل، انتظر الجولة القادمة' });
+      ws.close();
+      return;
+    }
+    if (room.players.size >= MAX_PLAYERS) {
+      send(ws, { type: 'error', code: 'FULL', message: 'الغرفة ممتلئة' });
+      ws.close();
+      return;
+    }
+
+    const playerId = Math.random().toString(36).slice(2, 10);
+    const usedColors = new Set([...room.players.values()].map((p) => p.color));
+    const color = COLORS.find((c) => !usedColors.has(c)) || COLORS[room.players.size % COLORS.length];
+    room.players.set(playerId, { id: playerId, name, color, ws, alive: true });
+    ws.roomCode = code;
+    ws.playerId = playerId;
+
+    send(ws, { type: 'joined', code, playerId, color });
+    broadcast(room, lobbyPayload(room));
+  }
+
   ws.isAlive = true;
   ws.on('pong', () => (ws.isAlive = true));
 
@@ -210,75 +253,18 @@ wss.on('connection', (ws) => {
     } catch {
       return;
     }
+    const room = rooms.get(ws.roomCode);
+    if (!room) return;
 
-    if (msg.type === 'create') {
-      const code = makeCode();
-      const room = {
-        code,
-        hostId: null,
-        players: new Map(),
-        status: 'lobby',
-        interval: null,
-        trailSet: new Set(),
-      };
-      rooms.set(code, room);
-
-      const playerId = Math.random().toString(36).slice(2, 10);
-      const color = COLORS[0];
-      room.players.set(playerId, { id: playerId, name: msg.name || 'لاعب', color, ws, alive: true });
-      room.hostId = playerId;
-      ws.roomCode = code;
-      ws.playerId = playerId;
-
-      send(ws, { type: 'created', code, playerId, color });
-      broadcast(room, lobbyPayload(room));
-    }
-
-    if (msg.type === 'join') {
-      const code = (msg.code || '').toUpperCase();
-      const room = rooms.get(code);
-      if (!room) {
-        send(ws, { type: 'error', message: 'الغرفة غير موجودة' });
-        return;
-      }
-      if (room.players.size >= MAX_PLAYERS) {
-        send(ws, { type: 'error', message: 'الغرفة ممتلئة' });
-        return;
-      }
-      if (room.status === 'playing') {
-        send(ws, { type: 'error', message: 'اللعبة بدأت بالفعل، انتظر الجولة القادمة' });
-        return;
-      }
-
-      const playerId = Math.random().toString(36).slice(2, 10);
-      const usedColors = new Set([...room.players.values()].map((p) => p.color));
-      const color = COLORS.find((c) => !usedColors.has(c)) || COLORS[room.players.size % COLORS.length];
-      room.players.set(playerId, { id: playerId, name: msg.name || 'لاعب', color, ws, alive: true });
-      ws.roomCode = code;
-      ws.playerId = playerId;
-
-      send(ws, { type: 'joined', code, playerId, color });
-      broadcast(room, lobbyPayload(room));
-    }
-
-    if (msg.type === 'start') {
-      const room = rooms.get(ws.roomCode);
-      if (!room || room.hostId !== ws.playerId) return;
+    if (msg.type === 'start' && room.hostId === ws.playerId) {
       startGame(room);
     }
-
-    if (msg.type === 'dir') {
-      const room = rooms.get(ws.roomCode);
-      if (!room || room.status !== 'playing') return;
+    if (msg.type === 'restart' && room.hostId === ws.playerId) {
+      startGame(room);
+    }
+    if (msg.type === 'dir' && room.status === 'playing') {
       const p = room.players.get(ws.playerId);
-      if (!p || !p.alive) return;
-      if (DIRS[msg.dir]) p.nextDir = msg.dir;
-    }
-
-    if (msg.type === 'restart') {
-      const room = rooms.get(ws.roomCode);
-      if (!room || room.hostId !== ws.playerId) return;
-      startGame(room);
+      if (p && p.alive && DIRS[msg.dir]) p.nextDir = msg.dir;
     }
   });
 

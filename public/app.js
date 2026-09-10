@@ -43,24 +43,47 @@
   const savedName = localStorage.getItem('tron_name') || '';
   nameInput.value = savedName;
 
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const ws = new WebSocket(`${proto}://${location.host}`);
-
-  function send(msg) {
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  function randomCode() {
+    return Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
   }
 
-  ws.addEventListener('open', () => {
+  let ws = null;
+  let connGen = 0;
+  let gotResponse = false;
+  let createRetriesLeft = 0;
+
+  function send(msg) {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  }
+
+  function connect(action, code, name) {
+    if (ws) ws.close();
+    const myGen = ++connGen;
+    gotResponse = false;
     homeError.textContent = '';
-  });
-  ws.addEventListener('close', () => {
-    homeError.textContent = 'انقطع الاتصال بالخادم. أعد تحميل الصفحة.';
-  });
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const url = `${proto}://${location.host}/ws?action=${action}&code=${code}&name=${encodeURIComponent(name)}`;
+    ws = new WebSocket(url);
+    ws.addEventListener('message', (ev) => {
+      if (myGen !== connGen) return;
+      handleMessage(ev);
+    });
+    ws.addEventListener('close', () => {
+      if (myGen !== connGen) return;
+      if (!gotResponse) {
+        homeError.textContent = 'تعذّر الاتصال بالخادم. حاول مرة أخرى.';
+      } else if (screens.game.classList.contains('active') || screens.lobby.classList.contains('active')) {
+        overlayHint.textContent = 'انقطع الاتصال بالخادم.';
+      }
+    });
+  }
 
   btnCreate.addEventListener('click', () => {
     const name = (nameInput.value || 'لاعب').trim().slice(0, 12) || 'لاعب';
     localStorage.setItem('tron_name', name);
-    send({ type: 'create', name });
+    createRetriesLeft = 5;
+    connect('create', randomCode(), name);
   });
 
   btnJoin.addEventListener('click', () => {
@@ -71,17 +94,25 @@
       return;
     }
     localStorage.setItem('tron_name', name);
-    send({ type: 'join', code, name });
+    connect('join', code, name);
   });
 
   btnStart.addEventListener('click', () => send({ type: 'start' }));
   btnRestart.addEventListener('click', () => send({ type: 'restart' }));
 
-  ws.addEventListener('message', (ev) => {
+  function handleMessage(ev) {
     const msg = JSON.parse(ev.data);
+    gotResponse = true;
 
     if (msg.type === 'error') {
+      if (msg.code === 'CODE_TAKEN' && createRetriesLeft > 0) {
+        createRetriesLeft--;
+        const name = (nameInput.value || 'لاعب').trim().slice(0, 12) || 'لاعب';
+        connect('create', randomCode(), name);
+        return;
+      }
       homeError.textContent = msg.message;
+      showScreen('home');
     }
 
     if (msg.type === 'created' || msg.type === 'joined') {
@@ -159,7 +190,7 @@
       overlayHint.textContent = isHost ? '' : 'بانتظار المضيف لبدء جولة جديدة…';
       overlay.classList.remove('hidden');
     }
-  });
+  }
 
   function escapeHtml(s) {
     return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

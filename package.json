@@ -4,10 +4,15 @@
   "description": "لعبة دراجات الضوء - متعددة اللاعبين",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "cf:dev": "wrangler dev",
+    "cf:deploy": "wrangler deploy"
   },
   "dependencies": {
     "express": "^4.19.2",
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.131.0"
   }
 }
