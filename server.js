@@ -166,7 +166,10 @@ function send(ws, msg) {
 }
 
 function broadcast(room, msg) {
-  for (const p of room.players.values()) send(p.ws, msg);
+  const raw = JSON.stringify(msg);
+  for (const p of room.players.values()) {
+    if (p.ws.readyState === p.ws.OPEN) p.ws.send(raw);
+  }
 }
 
 function lobbyPayload(room) {
@@ -654,6 +657,9 @@ function catsResetRound(room) {
   room.lastYarnTick = -9999;
   room.catsTick = 0;
   room.catsPlatforms = catsBuildPlatforms();
+  room.catsDynamicIdx = room.catsPlatforms
+    .map((pl, idx) => (pl.type === 'moving' || pl.type === 'crumble' ? idx : -1))
+    .filter((idx) => idx !== -1);
   room.pitState = room.catsPlatforms
     .map((pl, idx) => (pl.type === 'pitfloor' ? idx : -1))
     .filter((idx) => idx !== -1)
@@ -936,7 +942,10 @@ function tickCats(room) {
         trapped: p.trapped, impact: impactIds.has(p.id),
       };
     }),
-    platforms,
+    platformUpdates: room.catsDynamicIdx.map((i) => {
+      const pl = platforms[i];
+      return { i, x: pl.x, y: pl.y, broken: pl.broken, standTicks: pl.standTicks };
+    }),
     yarns: room.yarns,
     score: room.score,
     combo: room.combo,

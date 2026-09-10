@@ -417,7 +417,12 @@
         updateCoopHud();
       } else if (currentMode === 'cats') {
         catsYarns = msg.yarns || catsYarns;
-        if (msg.platforms) catsPlatforms = msg.platforms;
+        if (msg.platformUpdates) {
+          for (const u of msg.platformUpdates) {
+            const pl = catsPlatforms[u.i];
+            if (pl) { pl.x = u.x; pl.y = u.y; pl.broken = u.broken; pl.standTicks = u.standTicks; }
+          }
+        }
         if (msg.score > catsScore && msg.combo > 1) showToast(`🧶 سلسلة x${msg.combo}!`);
         catsScore = msg.score;
         catsCombo = msg.combo || 0;

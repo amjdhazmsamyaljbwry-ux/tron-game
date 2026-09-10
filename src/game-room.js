@@ -215,6 +215,7 @@ export class GameRoom {
     this.yarns = [];
     this.catsTick = 0;
     this.catsPlatforms = [];
+    this.catsDynamicIdx = [];
     this.pitState = [];
     this.combo = 0;
     this.lastYarnTick = -9999;
@@ -230,7 +231,14 @@ export class GameRoom {
   }
 
   broadcast(msg) {
-    for (const p of this.players.values()) this.send(p.ws, msg);
+    const raw = JSON.stringify(msg);
+    for (const p of this.players.values()) {
+      try {
+        if (p.ws.readyState === 1) p.ws.send(raw);
+      } catch {
+        // socket already gone
+      }
+    }
   }
 
   lobbyPayload() {
@@ -831,6 +839,9 @@ export class GameRoom {
     this.lastYarnTick = -9999;
     this.catsTick = 0;
     this.catsPlatforms = this.catsBuildPlatforms();
+    this.catsDynamicIdx = this.catsPlatforms
+      .map((pl, idx) => (pl.type === 'moving' || pl.type === 'crumble' ? idx : -1))
+      .filter((idx) => idx !== -1);
     this.pitState = this.catsPlatforms
       .map((pl, idx) => (pl.type === 'pitfloor' ? idx : -1))
       .filter((idx) => idx !== -1)
@@ -1113,7 +1124,10 @@ export class GameRoom {
           trapped: p.trapped, impact: impactIds.has(p.id),
         };
       }),
-      platforms,
+      platformUpdates: this.catsDynamicIdx.map((i) => {
+        const pl = platforms[i];
+        return { i, x: pl.x, y: pl.y, broken: pl.broken, standTicks: pl.standTicks };
+      }),
       yarns: this.yarns,
       score: this.score,
       combo: this.combo,
