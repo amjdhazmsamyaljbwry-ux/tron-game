@@ -6,14 +6,17 @@ const { WebSocketServer } = require('ws');
 const PORT = process.env.PORT || 3000;
 
 // ---- وضع دراجات الضوء (تنافسي) ----
-const GRID_W = 44;
-const GRID_H = 28;
+const GRID_W = 60;
+const GRID_H = 38;
 const TICK_MS = 110;
 const MAX_PLAYERS = 6;
+const SHRINK_START_TICKS = Math.round(8000 / TICK_MS);
+const SHRINK_INTERVAL_TICKS = Math.round(3000 / TICK_MS);
+const TRON_POWERUP_COUNT = 2;
 
 // ---- وضع غزو الجواهر (تعاوني) ----
-const COOP_GRID_W = 24;
-const COOP_GRID_H = 16;
+const COOP_GRID_W = 34;
+const COOP_GRID_H = 22;
 const COOP_TICK_START = 160;
 const COOP_TICK_MIN = 90;
 const COOP_TICK_STEP = 8;
@@ -21,9 +24,52 @@ const COOP_MAX_PLAYERS = 4;
 const COOP_START_LIVES = 5;
 const COOP_COIN_COUNT = 4;
 const COOP_OBSTACLES_START = 3;
-const COOP_OBSTACLES_MAX = 9;
+const COOP_OBSTACLES_MAX = 10;
 const COOP_LEVEL_STEP = 10;
 const COOP_RESPAWN_MS = 1400;
+const COOP_DRONE_MAX = 3;
+const COOP_SHIELD_SPAWN_CHANCE = 0.01;
+
+// ---- وضع القطط المربوطة (تعاوني - منصات) ----
+const CATS_TICK_MS = 33;
+const CATS_GRAVITY = 1;
+const CATS_JUMP_V = -16;
+const CATS_MOVE_SPEED = 5;
+const CATS_MAX_FALL = 18;
+const CATS_MAX_PLAYERS = 4;
+const CAT_W = 30;
+const CAT_H = 30;
+const ROPE_LENGTH = 120;
+const CATS_COYOTE_TICKS = 6;
+const CATS_JUMP_BUFFER_TICKS = 6;
+const CATS_WORLD_W = 2600;
+const CATS_WORLD_H = 760;
+const CATS_PLATFORMS = [
+  { x: 0, y: 560, w: 260, h: 200 },
+  { x: 360, y: 560, w: 200, h: 200 },
+  { x: 650, y: 480, w: 150, h: 200 },
+  { x: 920, y: 560, w: 260, h: 200 },
+  { x: 1270, y: 490, w: 120, h: 26 },
+  { x: 1480, y: 420, w: 120, h: 26 },
+  { x: 1720, y: 560, w: 220, h: 200 },
+  { x: 2040, y: 500, w: 150, h: 26 },
+  { x: 2290, y: 560, w: 270, h: 200 },
+];
+const CATS_SPIKES = [
+  { x: 1030, y: 530, w: 40, h: 30 },
+  { x: 1800, y: 530, w: 40, h: 30 },
+];
+const CATS_CHECKPOINTS = [
+  { zone: { x: 380, y: 400, w: 60, h: 160 }, spawn: { x: 400, y: 500 } },
+  { zone: { x: 930, y: 400, w: 60, h: 160 }, spawn: { x: 950, y: 500 } },
+  { zone: { x: 1730, y: 400, w: 60, h: 160 }, spawn: { x: 1750, y: 500 } },
+  { zone: { x: 2300, y: 400, w: 60, h: 160 }, spawn: { x: 2320, y: 500 } },
+];
+const CATS_YARNS = [
+  { x: 460, y: 520 }, { x: 780, y: 440 }, { x: 1030, y: 500 },
+  { x: 1330, y: 450 }, { x: 2100, y: 460 }, { x: 2420, y: 520 },
+];
+const CATS_FINISH_X = 2470;
 
 const COLORS = ['#ff5252', '#40c4ff', '#69f0ae', '#ffd740', '#e040fb', '#ff6e40'];
 const DIRS = {
@@ -33,6 +79,7 @@ const DIRS = {
   right: { x: 1, y: 0 },
 };
 const OPPOSITE = { up: 'down', down: 'up', left: 'right', right: 'left' };
+const MODES = ['tron', 'coop', 'cats'];
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
@@ -66,11 +113,17 @@ function lobbyPayload(room) {
 }
 
 function maxPlayersFor(mode) {
-  return mode === 'coop' ? COOP_MAX_PLAYERS : MAX_PLAYERS;
+  if (mode === 'coop') return COOP_MAX_PLAYERS;
+  if (mode === 'cats') return CATS_MAX_PLAYERS;
+  return MAX_PLAYERS;
 }
 
 function minPlayersFor(mode) {
-  return mode === 'coop' ? 1 : 2;
+  return mode === 'tron' ? 2 : 1;
+}
+
+function aabbOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
 // ======================= دراجات الضوء (تنافسي) =======================
@@ -78,7 +131,7 @@ function minPlayersFor(mode) {
 function startPositions(n) {
   const cx = GRID_W / 2;
   const cy = GRID_H / 2;
-  const radius = Math.min(GRID_W, GRID_H) / 2 - 3;
+  const radius = Math.min(GRID_W, GRID_H) / 2 - 4;
   const positions = [];
   for (let i = 0; i < n; i++) {
     const angle = (i * 2 * Math.PI) / n - Math.PI / 2;
@@ -94,10 +147,37 @@ function startPositions(n) {
   return positions;
 }
 
+function tronOccupied(room) {
+  const occ = new Set(room.trailSet);
+  for (const p of room.players.values()) occ.add(`${p.x},${p.y}`);
+  for (const pu of room.powerups) occ.add(`${pu.x},${pu.y}`);
+  return occ;
+}
+
+function tronFreeCell(room) {
+  const avoid = tronOccupied(room);
+  for (let attempt = 0; attempt < 300; attempt++) {
+    const x = Math.floor(Math.random() * GRID_W);
+    const y = Math.floor(Math.random() * GRID_H);
+    const key = `${x},${y}`;
+    if (avoid.has(key)) continue;
+    return { x, y };
+  }
+  return null;
+}
+
+function tronSpawnPowerup(room) {
+  const cell = tronFreeCell(room);
+  if (cell) room.powerups.push(cell);
+}
+
 function resetRound(room) {
   const ids = [...room.players.keys()];
   const positions = startPositions(ids.length);
   room.trailSet = new Set();
+  room.powerups = [];
+  room.tronTick = 0;
+  room.inset = 0;
   ids.forEach((id, i) => {
     const p = room.players.get(id);
     p.x = positions[i].x;
@@ -105,8 +185,10 @@ function resetRound(room) {
     p.dir = positions[i].dir;
     p.nextDir = positions[i].dir;
     p.alive = true;
+    p.shield = false;
     room.trailSet.add(`${p.x},${p.y}`);
   });
+  for (let i = 0; i < TRON_POWERUP_COUNT; i++) tronSpawnPowerup(room);
   room.status = 'playing';
 }
 
@@ -124,6 +206,8 @@ function startTronGame(room) {
       y: p.y,
       dir: p.dir,
     })),
+    powerups: room.powerups,
+    inset: 0,
   });
   if (room.interval) clearInterval(room.interval);
   room.interval = setInterval(() => tickTron(room), TICK_MS);
@@ -141,6 +225,13 @@ function endTronRound(room, winner) {
 }
 
 function tickTron(room) {
+  room.tronTick++;
+  const maxInset = Math.floor(Math.min(GRID_W, GRID_H) / 2) - 6;
+  if (room.tronTick >= SHRINK_START_TICKS) {
+    room.inset = Math.min(maxInset, 1 + Math.floor((room.tronTick - SHRINK_START_TICKS) / SHRINK_INTERVAL_TICKS));
+  }
+  const inset = room.inset;
+
   const alivePlayers = [...room.players.values()].filter((p) => p.alive);
   const nextHeads = new Map();
 
@@ -161,23 +252,34 @@ function tickTron(room) {
     const { nx, ny } = nextHeads.get(p.id);
     const key = `${nx},${ny}`;
     let dead = false;
-    if (nx < 0 || nx >= GRID_W || ny < 0 || ny >= GRID_H) dead = true;
+    if (nx < inset || nx >= GRID_W - inset || ny < inset || ny >= GRID_H - inset) dead = true;
     else if (room.trailSet.has(key)) dead = true;
     else if (headCellCounts.get(key) > 1) dead = true;
 
     if (dead) {
+      if (p.shield) {
+        p.shield = false;
+        events.push({ id: p.id, x: p.x, y: p.y, alive: true, trailCell: null, shield: false, shieldUsed: true });
+        continue;
+      }
       p.alive = false;
       events.push({ id: p.id, x: p.x, y: p.y, alive: false, trailCell: null });
     } else {
+      const puIdx = room.powerups.findIndex((pu) => pu.x === nx && pu.y === ny);
+      if (puIdx !== -1) {
+        room.powerups.splice(puIdx, 1);
+        p.shield = true;
+        tronSpawnPowerup(room);
+      }
       room.trailSet.add(`${p.x},${p.y}`);
       const trailCell = { x: p.x, y: p.y };
       p.x = nx;
       p.y = ny;
-      events.push({ id: p.id, x: p.x, y: p.y, alive: true, trailCell });
+      events.push({ id: p.id, x: p.x, y: p.y, alive: true, trailCell, shield: p.shield });
     }
   }
 
-  broadcast(room, { type: 'tick', mode: 'tron', players: events });
+  broadcast(room, { type: 'tick', mode: 'tron', players: events, powerups: room.powerups, inset });
 
   const stillAlive = [...room.players.values()].filter((p) => p.alive);
   if (stillAlive.length <= 1) {
@@ -186,6 +288,16 @@ function tickTron(room) {
 }
 
 // ======================= غزو الجواهر (تعاوني) =======================
+
+function coopOccupied(room) {
+  const occ = new Set();
+  for (const p of room.players.values()) occ.add(`${p.x},${p.y}`);
+  for (const o of room.obstacles) occ.add(`${o.x},${o.y}`);
+  for (const c of room.coins) occ.add(`${c.x},${c.y}`);
+  for (const d of room.drones) occ.add(`${d.x},${d.y}`);
+  if (room.shieldPickup) occ.add(`${room.shieldPickup.x},${room.shieldPickup.y}`);
+  return occ;
+}
 
 function coopFreeCell(room, avoid) {
   for (let attempt = 0; attempt < 200; attempt++) {
@@ -198,17 +310,8 @@ function coopFreeCell(room, avoid) {
   return { x: Math.floor(COOP_GRID_W / 2), y: Math.floor(COOP_GRID_H / 2) };
 }
 
-function coopOccupied(room) {
-  const occ = new Set();
-  for (const p of room.players.values()) occ.add(`${p.x},${p.y}`);
-  for (const o of room.obstacles) occ.add(`${o.x},${o.y}`);
-  for (const c of room.coins) occ.add(`${c.x},${c.y}`);
-  return occ;
-}
-
 function coopSpawnCoin(room) {
-  const cell = coopFreeCell(room, coopOccupied(room));
-  room.coins.push(cell);
+  room.coins.push(coopFreeCell(room, coopOccupied(room)));
 }
 
 function coopSpawnObstacle(room) {
@@ -220,6 +323,15 @@ function coopSpawnObstacle(room) {
     dy = dirs[Math.floor(Math.random() * 3)];
   }
   room.obstacles.push({ x: cell.x, y: cell.y, dx, dy });
+}
+
+function coopSpawnDrone(room) {
+  const cell = coopFreeCell(room, coopOccupied(room));
+  room.drones.push({ x: cell.x, y: cell.y });
+}
+
+function coopSpawnShield(room) {
+  room.shieldPickup = coopFreeCell(room, coopOccupied(room));
 }
 
 function coopStartPositions(n) {
@@ -243,9 +355,13 @@ function coopResetRound(room) {
     p.nextDir = 'right';
     p.down = false;
     p.downTicks = 0;
+    p.shield = false;
   });
   room.coins = [];
   room.obstacles = [];
+  room.drones = [];
+  room.shieldPickup = null;
+  room.droneBeat = 0;
   room.score = 0;
   room.level = 1;
   room.lives = COOP_START_LIVES;
@@ -271,6 +387,8 @@ function startCoopGame(room) {
     })),
     coins: room.coins,
     obstacles: room.obstacles,
+    drones: room.drones,
+    shieldPickup: room.shieldPickup,
     score: room.score,
     lives: room.lives,
     level: room.level,
@@ -292,7 +410,6 @@ function endCoopRound(room) {
 }
 
 function tickCoop(room) {
-  // تحريك الكويكبات وارتدادها عن الجدران
   for (const o of room.obstacles) {
     let nx = o.x + o.dx;
     let ny = o.y + o.dy;
@@ -301,7 +418,29 @@ function tickCoop(room) {
     o.x = Math.max(0, Math.min(COOP_GRID_W - 1, nx));
     o.y = Math.max(0, Math.min(COOP_GRID_H - 1, ny));
   }
-  const obstacleCells = new Set(room.obstacles.map((o) => `${o.x},${o.y}`));
+
+  room.droneBeat = (room.droneBeat + 1) % 2;
+  if (room.droneBeat === 0) {
+    for (const d of room.drones) {
+      let target = null, bestDist = Infinity;
+      for (const p of room.players.values()) {
+        if (p.down) continue;
+        const dist = Math.abs(p.x - d.x) + Math.abs(p.y - d.y);
+        if (dist < bestDist) { bestDist = dist; target = p; }
+      }
+      if (target) {
+        d.x = Math.max(0, Math.min(COOP_GRID_W - 1, d.x + Math.sign(target.x - d.x)));
+        d.y = Math.max(0, Math.min(COOP_GRID_H - 1, d.y + Math.sign(target.y - d.y)));
+      }
+    }
+  }
+
+  if (!room.shieldPickup && Math.random() < COOP_SHIELD_SPAWN_CHANCE) coopSpawnShield(room);
+
+  const dangerCells = new Set([
+    ...room.obstacles.map((o) => `${o.x},${o.y}`),
+    ...room.drones.map((d) => `${d.x},${d.y}`),
+  ]);
 
   const events = [];
   let leveledUp = false;
@@ -315,7 +454,7 @@ function tickCoop(room) {
         p.y = cell.y;
         p.down = false;
       }
-      events.push({ id: p.id, x: p.x, y: p.y, down: p.down, dir: p.dir });
+      events.push({ id: p.id, x: p.x, y: p.y, down: p.down, dir: p.dir, shield: p.shield });
       continue;
     }
 
@@ -324,18 +463,28 @@ function tickCoop(room) {
     const nx = p.x + d.x;
     const ny = p.y + d.y;
     const outOfBounds = nx < 0 || nx >= COOP_GRID_W || ny < 0 || ny >= COOP_GRID_H;
-    const hitObstacle = !outOfBounds && obstacleCells.has(`${nx},${ny}`);
+    const hitDanger = !outOfBounds && dangerCells.has(`${nx},${ny}`);
 
-    if (outOfBounds || hitObstacle) {
+    if (outOfBounds || hitDanger) {
+      if (p.shield) {
+        p.shield = false;
+        events.push({ id: p.id, x: p.x, y: p.y, down: false, dir: p.dir, shield: false, shieldUsed: true });
+        continue;
+      }
       room.lives--;
       p.down = true;
       p.downTicks = Math.max(1, Math.round(COOP_RESPAWN_MS / room.tickMs));
-      events.push({ id: p.id, x: p.x, y: p.y, down: true, dir: p.dir });
+      events.push({ id: p.id, x: p.x, y: p.y, down: true, dir: p.dir, shield: p.shield });
       continue;
     }
 
     p.x = nx;
     p.y = ny;
+
+    if (room.shieldPickup && room.shieldPickup.x === p.x && room.shieldPickup.y === p.y) {
+      p.shield = true;
+      room.shieldPickup = null;
+    }
 
     const coinIdx = room.coins.findIndex((c) => c.x === p.x && c.y === p.y);
     if (coinIdx !== -1) {
@@ -347,11 +496,12 @@ function tickCoop(room) {
         room.level = newLevel;
         room.tickMs = Math.max(COOP_TICK_MIN, COOP_TICK_START - (room.level - 1) * COOP_TICK_STEP);
         if (room.obstacles.length < COOP_OBSTACLES_MAX) coopSpawnObstacle(room);
+        if (room.level % 2 === 0 && room.drones.length < COOP_DRONE_MAX) coopSpawnDrone(room);
         leveledUp = true;
       }
     }
 
-    events.push({ id: p.id, x: p.x, y: p.y, down: false, dir: p.dir });
+    events.push({ id: p.id, x: p.x, y: p.y, down: false, dir: p.dir, shield: p.shield });
   }
 
   broadcast(room, {
@@ -360,6 +510,8 @@ function tickCoop(room) {
     players: events,
     coins: room.coins,
     obstacles: room.obstacles,
+    drones: room.drones,
+    shieldPickup: room.shieldPickup,
     score: room.score,
     lives: room.lives,
     level: room.level,
@@ -376,11 +528,190 @@ function tickCoop(room) {
   }
 }
 
+// ======================= القطط المربوطة (تعاوني - منصات) =======================
+
+function catsStep(p, platforms) {
+  let newX = p.x + p.vx;
+  const rectX = { x: newX, y: p.y, w: CAT_W, h: CAT_H };
+  for (const pl of platforms) {
+    if (aabbOverlap(rectX, pl)) {
+      if (p.vx > 0) newX = pl.x - CAT_W;
+      else if (p.vx < 0) newX = pl.x + pl.w;
+      p.vx = 0;
+    }
+  }
+  p.x = newX;
+
+  let newY = p.y + p.vy;
+  const rectY = { x: p.x, y: newY, w: CAT_W, h: CAT_H };
+  let grounded = false;
+  for (const pl of platforms) {
+    if (aabbOverlap(rectY, pl)) {
+      if (p.vy > 0) { newY = pl.y - CAT_H; grounded = true; }
+      else if (p.vy < 0) { newY = pl.y + pl.h; }
+      p.vy = 0;
+    }
+  }
+  p.y = newY;
+  p.grounded = grounded;
+}
+
+function catsResetRound(room) {
+  const ids = [...room.players.keys()];
+  room.checkpointIndex = -1;
+  room.spawnPoint = { x: 30, y: 480 };
+  room.yarns = CATS_YARNS.map((y) => ({ ...y }));
+  room.score = 0;
+  room.catsTick = 0;
+  ids.forEach((id, i) => {
+    const p = room.players.get(id);
+    p.x = room.spawnPoint.x + i * 24;
+    p.y = room.spawnPoint.y;
+    p.vx = 0;
+    p.vy = 0;
+    p.grounded = false;
+    p.moveDir = 0;
+    p.facing = 'right';
+    p.coyoteTicks = 0;
+    p.jumpBufferTicks = 0;
+  });
+  room.status = 'playing';
+}
+
+function startCatsGame(room) {
+  catsResetRound(room);
+  const ids = [...room.players.keys()];
+  broadcast(room, {
+    type: 'start',
+    mode: 'cats',
+    world: { w: CATS_WORLD_W, h: CATS_WORLD_H },
+    platforms: CATS_PLATFORMS,
+    spikes: CATS_SPIKES,
+    checkpoints: CATS_CHECKPOINTS.map((c) => c.zone),
+    finishX: CATS_FINISH_X,
+    players: ids.map((id) => {
+      const p = room.players.get(id);
+      return { id: p.id, name: p.name, color: p.color, x: p.x, y: p.y, facing: p.facing };
+    }),
+    yarns: room.yarns,
+    score: room.score,
+  });
+  if (room.interval) clearInterval(room.interval);
+  room.interval = setInterval(() => tickCats(room), CATS_TICK_MS);
+}
+
+function endCatsRound(room) {
+  room.status = 'lobby';
+  clearInterval(room.interval);
+  room.interval = null;
+  broadcast(room, {
+    type: 'gameover',
+    mode: 'cats',
+    score: room.score,
+    totalYarns: CATS_YARNS.length,
+    timeMs: room.catsTick * CATS_TICK_MS,
+  });
+}
+
+function tickCats(room) {
+  room.catsTick++;
+  const ids = [...room.players.keys()];
+  if (ids.length === 0) return;
+
+  for (const id of ids) {
+    const p = room.players.get(id);
+    const wasGrounded = p.grounded;
+    p.vx = p.moveDir * CATS_MOVE_SPEED;
+    if (p.moveDir !== 0) p.facing = p.moveDir > 0 ? 'right' : 'left';
+    p.vy = Math.min(p.vy + CATS_GRAVITY, CATS_MAX_FALL);
+    catsStep(p, CATS_PLATFORMS);
+    p.x = Math.max(0, Math.min(CATS_WORLD_W - CAT_W, p.x));
+    if (wasGrounded && !p.grounded) p.coyoteTicks = CATS_COYOTE_TICKS;
+    else if (!p.grounded && p.coyoteTicks > 0) p.coyoteTicks--;
+
+    if (p.jumpBufferTicks > 0) {
+      p.jumpBufferTicks--;
+      if (p.grounded) {
+        p.vy = CATS_JUMP_V;
+        p.grounded = false;
+        p.jumpBufferTicks = 0;
+        p.coyoteTicks = 0;
+      }
+    }
+  }
+
+  for (let iter = 0; iter < 2; iter++) {
+    for (let i = 0; i < ids.length - 1; i++) {
+      const a = room.players.get(ids[i]);
+      const b = room.players.get(ids[i + 1]);
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const dist = Math.hypot(dx, dy) || 0.0001;
+      if (dist > ROPE_LENGTH) {
+        const diff = (dist - ROPE_LENGTH) / dist / 2;
+        const offX = dx * diff;
+        const offY = dy * diff;
+        a.x += offX; a.y += offY;
+        b.x -= offX; b.y -= offY;
+      }
+    }
+  }
+
+  let needReset = false;
+  for (const id of ids) {
+    const p = room.players.get(id);
+    const rect = { x: p.x, y: p.y, w: CAT_W, h: CAT_H };
+    if (p.y > CATS_WORLD_H) needReset = true;
+    for (const s of CATS_SPIKES) {
+      if (aabbOverlap(rect, s)) needReset = true;
+    }
+    CATS_CHECKPOINTS.forEach((cp, idx) => {
+      if (idx > room.checkpointIndex && aabbOverlap(rect, cp.zone)) {
+        room.checkpointIndex = idx;
+        room.spawnPoint = cp.spawn;
+        broadcast(room, { type: 'checkpoint', index: idx });
+      }
+    });
+    room.yarns = room.yarns.filter((y) => {
+      const hit = Math.abs(p.x + CAT_W / 2 - y.x) < 22 && Math.abs(p.y + CAT_H / 2 - y.y) < 22;
+      if (hit) room.score++;
+      return !hit;
+    });
+  }
+
+  if (needReset) {
+    ids.forEach((id, i) => {
+      const p = room.players.get(id);
+      p.x = room.spawnPoint.x + i * 24;
+      p.y = room.spawnPoint.y;
+      p.vx = 0;
+      p.vy = 0;
+      p.grounded = false;
+    });
+    broadcast(room, { type: 'hazard' });
+  }
+
+  broadcast(room, {
+    type: 'tick',
+    mode: 'cats',
+    players: ids.map((id) => {
+      const p = room.players.get(id);
+      return { id: p.id, x: p.x, y: p.y, grounded: p.grounded, facing: p.facing };
+    }),
+    yarns: room.yarns,
+    score: room.score,
+  });
+
+  const allFinished = ids.every((id) => room.players.get(id).x >= CATS_FINISH_X);
+  if (allFinished) endCatsRound(room);
+}
+
 // ======================= اتصال WebSocket المشترك =======================
 
 function startGame(room) {
   if (room.players.size < minPlayersFor(room.mode)) return;
   if (room.mode === 'coop') startCoopGame(room);
+  else if (room.mode === 'cats') startCatsGame(room);
   else startTronGame(room);
 }
 
@@ -405,7 +736,7 @@ function removePlayer(ws) {
     if (room.mode === 'tron') {
       const stillAlive = [...room.players.values()].filter((pl) => pl.alive);
       if (stillAlive.length <= 1) endTronRound(room, stillAlive[0] || null);
-    } else if (room.players.size === 0) {
+    } else if (room.mode === 'coop' && room.players.size === 0) {
       endCoopRound(room);
     }
   }
@@ -413,12 +744,27 @@ function removePlayer(ws) {
   broadcast(room, lobbyPayload(room));
 }
 
+function newPlayer(ws, name, color) {
+  return {
+    id: null,
+    name,
+    color,
+    ws,
+    alive: true,
+    down: false,
+    shield: false,
+    x: 0, y: 0, vx: 0, vy: 0, grounded: false, moveDir: 0, facing: 'right',
+    coyoteTicks: 0, jumpBufferTicks: 0,
+  };
+}
+
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url, 'http://x');
   const action = url.searchParams.get('action');
   const code = (url.searchParams.get('code') || '').trim();
   const name = (url.searchParams.get('name') || 'لاعب').slice(0, 12);
-  const modeParam = url.searchParams.get('mode') === 'coop' ? 'coop' : 'tron';
+  const modeRaw = url.searchParams.get('mode');
+  const modeParam = MODES.includes(modeRaw) ? modeRaw : 'tron';
 
   if (!/^[0-9]{4}$/.test(code) || (action !== 'create' && action !== 'join')) {
     send(ws, { type: 'error', code: 'BAD_REQUEST', message: 'طلب غير صالح' });
@@ -440,23 +786,34 @@ wss.on('connection', (ws, req) => {
       status: 'lobby',
       interval: null,
       trailSet: new Set(),
+      powerups: [],
+      tronTick: 0,
+      inset: 0,
       coins: [],
       obstacles: [],
+      drones: [],
+      shieldPickup: null,
+      droneBeat: 0,
       score: 0,
       level: 1,
       lives: 0,
       tickMs: COOP_TICK_START,
+      checkpointIndex: -1,
+      spawnPoint: { x: 30, y: 480 },
+      yarns: [],
+      catsTick: 0,
     };
     rooms.set(code, room);
 
     const playerId = Math.random().toString(36).slice(2, 10);
-    const color = COLORS[0];
-    room.players.set(playerId, { id: playerId, name, color, ws, alive: true, down: false });
+    const player = newPlayer(ws, name, COLORS[0]);
+    player.id = playerId;
+    room.players.set(playerId, player);
     room.hostId = playerId;
     ws.roomCode = code;
     ws.playerId = playerId;
 
-    send(ws, { type: 'created', code, playerId, color, mode: room.mode });
+    send(ws, { type: 'created', code, playerId, color: player.color, mode: room.mode });
     broadcast(room, lobbyPayload(room));
   } else {
     const room = rooms.get(code);
@@ -479,7 +836,9 @@ wss.on('connection', (ws, req) => {
     const playerId = Math.random().toString(36).slice(2, 10);
     const usedColors = new Set([...room.players.values()].map((p) => p.color));
     const color = COLORS.find((c) => !usedColors.has(c)) || COLORS[room.players.size % COLORS.length];
-    room.players.set(playerId, { id: playerId, name, color, ws, alive: true, down: false });
+    const player = newPlayer(ws, name, color);
+    player.id = playerId;
+    room.players.set(playerId, player);
     ws.roomCode = code;
     ws.playerId = playerId;
 
@@ -506,13 +865,30 @@ wss.on('connection', (ws, req) => {
     if (msg.type === 'restart' && room.hostId === ws.playerId) {
       startGame(room);
     }
-    if (msg.type === 'dir' && room.status === 'playing' && DIRS[msg.dir]) {
+    if (msg.type === 'dir' && room.status === 'playing' && DIRS[msg.dir] && room.mode !== 'cats') {
       const p = room.players.get(ws.playerId);
       if (!p) return;
       if (room.mode === 'tron') {
         if (p.alive) p.nextDir = msg.dir;
       } else if (!p.down) {
         p.nextDir = msg.dir;
+      }
+    }
+    if (msg.type === 'move' && room.status === 'playing' && room.mode === 'cats') {
+      const p = room.players.get(ws.playerId);
+      if (p) p.moveDir = msg.dir === 'left' ? -1 : msg.dir === 'right' ? 1 : 0;
+    }
+    if (msg.type === 'jump' && room.status === 'playing' && room.mode === 'cats') {
+      const p = room.players.get(ws.playerId);
+      if (p) {
+        if (p.grounded || p.coyoteTicks > 0) {
+          p.vy = CATS_JUMP_V;
+          p.grounded = false;
+          p.coyoteTicks = 0;
+          p.jumpBufferTicks = 0;
+        } else {
+          p.jumpBufferTicks = CATS_JUMP_BUFFER_TICKS;
+        }
       }
     }
   });

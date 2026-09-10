@@ -36,6 +36,11 @@
         <span class="mode-name">غزو الجواهر</span>
         <span class="mode-desc">تعاوني · حتى 4 لاعبين</span>
       </button>
+      <button type="button" class="mode-card" data-mode="cats">
+        <span class="mode-icon">🐱</span>
+        <span class="mode-name">القطط المربوطة</span>
+        <span class="mode-desc">باركور تعاوني · حتى 4 لاعبين</span>
+      </button>
     </div>
 
     <label class="field">
@@ -80,6 +85,10 @@
     <span class="coop-chip">❤️ <b id="coop-lives">0</b></span>
     <span class="coop-chip">🚀 <span id="coop-level">1</span></span>
   </div>
+  <div id="cats-hud" class="coop-hud hidden">
+    <span class="coop-chip">🧶 <b id="cats-score">0</b>/<span id="cats-total">0</span></span>
+    <span class="coop-chip">⏱️ <b id="cats-time">0.0</b></span>
+  </div>
   <div id="toast" class="toast"></div>
   <canvas id="game-canvas"></canvas>
 
@@ -94,8 +103,8 @@
   <div id="controls" class="controls">
     <button class="pad-btn" data-dir="left">◀</button>
     <div class="pad-col">
-      <button class="pad-btn" data-dir="up">▲</button>
-      <button class="pad-btn" data-dir="down">▼</button>
+      <button id="pad-up" class="pad-btn" data-dir="up">▲</button>
+      <button id="pad-down" class="pad-btn" data-dir="down">▼</button>
     </div>
     <button class="pad-btn" data-dir="right">▶</button>
   </div>
