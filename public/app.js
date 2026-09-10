@@ -173,7 +173,6 @@
   let catsStartTs = 0;
   let catsFinalTimeMs = null;
   let camX = 0, camY = 0;
-  let screenShake = 0;
   let pulling = false;
 
   const savedName = localStorage.getItem('tron_name') || '';
@@ -319,7 +318,6 @@
         catsStartTs = performance.now();
         currentTickMs = CATS_TICK_MS;
         pulling = false;
-        screenShake = 0;
         players = new Map();
         msg.players.forEach((p) => {
           players.set(p.id, {
@@ -384,7 +382,6 @@
         if (ev.facing) p.facing = ev.facing;
         if ('grounded' in ev) p.grounded = ev.grounded;
         if ('trapped' in ev) p.trapped = ev.trapped;
-        if (ev.impact) screenShake = 8;
         p.lastTick = now;
 
         if (currentMode === 'cats' && ev.id === myId) {
@@ -436,7 +433,6 @@
     if (msg.type === 'hazard') showToast('💥 أُعدتم لآخر نقطة تفتيش!');
     if (msg.type === 'rescue') {
       showToast(msg.success ? '🤝 تم الإنقاذ!' : '😿 سحبكم الوزن للحفرة!');
-      screenShake = msg.success ? 4 : 10;
     }
 
     if (msg.type === 'gameover') {
@@ -777,8 +773,7 @@
 
   function drawCat(x, y, color, facing, down, trapped, now) {
     const w = 30, h = 30;
-    const shake = trapped ? Math.sin((now || 0) / 60) * 2 : 0;
-    const cx = x + w / 2 + shake, cy = y + h / 2;
+    const cx = x + w / 2, cy = y + h / 2;
     ctx.save();
     ctx.translate(cx, cy);
     if (facing === 'left') ctx.scale(-1, 1);
@@ -863,12 +858,8 @@
       ctx.fill();
     });
 
-    const shakeX = screenShake > 0 ? (Math.random() - 0.5) * screenShake : 0;
-    const shakeY = screenShake > 0 ? (Math.random() - 0.5) * screenShake : 0;
-    if (screenShake > 0) screenShake = Math.max(0, screenShake - 0.5);
-
     ctx.save();
-    ctx.translate(-camX + shakeX, -camY + shakeY);
+    ctx.translate(-camX, -camY);
 
     catsCheckpoints.forEach((cp) => {
       const px = cp.x + cp.w / 2;
@@ -946,10 +937,7 @@
       if (pl.type === 'ice') {
         ctx.fillStyle = '#4a6b7a';
         ctx.fillRect(pl.x, pl.y, pl.w, Math.min(pl.h, 60));
-        const grad = ctx.createLinearGradient(pl.x, pl.y, pl.x, pl.y + 16);
-        grad.addColorStop(0, '#e0f7ff');
-        grad.addColorStop(1, '#8ecfe0');
-        ctx.fillStyle = grad;
+        ctx.fillStyle = '#bce8f5';
         ctx.fillRect(pl.x, pl.y, pl.w, 12);
         ctx.strokeStyle = 'rgba(255,255,255,0.5)';
         ctx.lineWidth = 1;
