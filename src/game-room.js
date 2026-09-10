@@ -112,7 +112,7 @@ export class GameRoom {
   async fetch(request) {
     const url = new URL(request.url);
     const action = url.searchParams.get('action');
-    const code = (url.searchParams.get('code') || '').toUpperCase();
+    const code = (url.searchParams.get('code') || '').trim();
     const name = (url.searchParams.get('name') || 'لاعب').slice(0, 12);
     const modeParam = url.searchParams.get('mode') === 'coop' ? 'coop' : 'tron';
 

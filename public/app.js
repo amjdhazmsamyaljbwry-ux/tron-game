@@ -75,9 +75,8 @@
   const savedName = localStorage.getItem('tron_name') || '';
   nameInput.value = savedName;
 
-  const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
   function randomCode() {
-    return Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
+    return String(Math.floor(Math.random() * 10000)).padStart(4, '0');
   }
 
   let ws = null;
@@ -121,13 +120,17 @@
 
   btnJoin.addEventListener('click', () => {
     const name = (nameInput.value || 'لاعب').trim().slice(0, 12) || 'لاعب';
-    const code = (codeInput.value || '').trim().toUpperCase();
-    if (code.length !== 4) {
-      homeError.textContent = 'أدخل رمز غرفة مكوّن من 4 أحرف';
+    const code = (codeInput.value || '').trim();
+    if (!/^[0-9]{4}$/.test(code)) {
+      homeError.textContent = 'أدخل رمز غرفة مكوّن من 4 أرقام';
       return;
     }
     localStorage.setItem('tron_name', name);
     connect('join', code, name);
+  });
+
+  codeInput.addEventListener('input', () => {
+    codeInput.value = codeInput.value.replace(/[^0-9]/g, '').slice(0, 4);
   });
 
   btnStart.addEventListener('click', () => send({ type: 'start' }));

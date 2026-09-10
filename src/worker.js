@@ -5,9 +5,9 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === '/ws') {
-      const code = (url.searchParams.get('code') || '').toUpperCase();
+      const code = (url.searchParams.get('code') || '').trim();
       const action = url.searchParams.get('action');
-      if (!/^[A-Z]{4}$/.test(code) || (action !== 'create' && action !== 'join')) {
+      if (!/^[0-9]{4}$/.test(code) || (action !== 'create' && action !== 'join')) {
         return new Response('bad request', { status: 400 });
       }
       const id = env.GAME_ROOM.idFromName(code);

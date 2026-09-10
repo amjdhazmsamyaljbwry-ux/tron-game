@@ -416,11 +416,11 @@ function removePlayer(ws) {
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url, 'http://x');
   const action = url.searchParams.get('action');
-  const code = (url.searchParams.get('code') || '').toUpperCase();
+  const code = (url.searchParams.get('code') || '').trim();
   const name = (url.searchParams.get('name') || 'لاعب').slice(0, 12);
   const modeParam = url.searchParams.get('mode') === 'coop' ? 'coop' : 'tron';
 
-  if (!/^[A-Z]{4}$/.test(code) || (action !== 'create' && action !== 'join')) {
+  if (!/^[0-9]{4}$/.test(code) || (action !== 'create' && action !== 'join')) {
     send(ws, { type: 'error', code: 'BAD_REQUEST', message: 'طلب غير صالح' });
     ws.close();
     return;
