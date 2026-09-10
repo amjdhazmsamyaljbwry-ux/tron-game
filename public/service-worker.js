@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tron-cache-v1';
+const CACHE_NAME = 'tron-cache-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -25,13 +25,18 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// شبكة أولاً ثم تخزين مؤقت كنسخة احتياطية عند انقطاع الإنترنت فقط،
+// حتى تصل تحديثات اللعبة فورًا دون الحاجة لمسح الذاكرة المؤقتة يدويًا.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   if (event.request.headers.get('upgrade') === 'websocket') return;
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).catch(() => cached);
-    })
+    fetch(event.request)
+      .then((res) => {
+        const resClone = res.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, resClone));
+        return res;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
