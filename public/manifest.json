@@ -1,0 +1,17 @@
+{
+  "name": "دراجات الضوء - لعبة أونلاين",
+  "short_name": "دراجات الضوء",
+  "description": "لعبة سريعة متعددة اللاعبين، اصنع مسارًا وتفادَ الاصطدام",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b0f1a",
+  "theme_color": "#0b0f1a",
+  "dir": "rtl",
+  "lang": "ar",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

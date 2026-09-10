@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>دراجات الضوء</title>
+
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#0b0f1a" />
+
+<!-- iOS PWA -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="دراجات الضوء" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- شاشة البداية -->
+<section id="screen-home" class="screen active">
+  <div class="card">
+    <h1>⚡ دراجات الضوء</h1>
+    <p class="subtitle">لعبة سريعة متعددة اللاعبين — اصنع مسارًا وتفادَ الاصطدام!</p>
+
+    <label class="field">
+      <span>اسمك</span>
+      <input id="name-input" type="text" maxlength="12" placeholder="اكتب اسمك" />
+    </label>
+
+    <button id="btn-create" class="btn primary">إنشاء غرفة جديدة</button>
+
+    <div class="divider">أو</div>
+
+    <label class="field">
+      <span>رمز الغرفة</span>
+      <input id="code-input" type="text" maxlength="4" placeholder="ABCD" style="text-transform:uppercase" />
+    </label>
+    <button id="btn-join" class="btn secondary">انضمام إلى غرفة</button>
+
+    <p id="home-error" class="error"></p>
+  </div>
+</section>
+
+<!-- شاشة الانتظار -->
+<section id="screen-lobby" class="screen">
+  <div class="card">
+    <h2>غرفة الانتظار</h2>
+    <p class="subtitle">شارك هذا الرمز مع أصدقائك:</p>
+    <div id="room-code" class="room-code">----</div>
+
+    <ul id="player-list" class="player-list"></ul>
+
+    <button id="btn-start" class="btn primary" disabled>ابدأ اللعبة</button>
+    <p id="lobby-hint" class="hint">بانتظار المضيف لبدء اللعبة…</p>
+  </div>
+</section>
+
+<!-- شاشة اللعبة -->
+<section id="screen-game" class="screen">
+  <div id="hud" class="hud"></div>
+  <canvas id="game-canvas"></canvas>
+
+  <div id="overlay" class="overlay hidden">
+    <div class="card">
+      <h2 id="overlay-title"></h2>
+      <button id="btn-restart" class="btn primary hidden">لعب جولة أخرى</button>
+      <p id="overlay-hint" class="hint"></p>
+    </div>
+  </div>
+
+  <div id="controls" class="controls">
+    <button class="pad-btn" data-dir="left">◀</button>
+    <div class="pad-col">
+      <button class="pad-btn" data-dir="up">▲</button>
+      <button class="pad-btn" data-dir="down">▼</button>
+    </div>
+    <button class="pad-btn" data-dir="right">▶</button>
+  </div>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>
