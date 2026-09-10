@@ -22,8 +22,21 @@
 <!-- شاشة البداية -->
 <section id="screen-home" class="screen active">
   <div class="card">
-    <h1>⚡ دراجات الضوء</h1>
-    <p class="subtitle">لعبة سريعة متعددة اللاعبين — اصنع مسارًا وتفادَ الاصطدام!</p>
+    <h1 id="home-title">⚡ دراجات الضوء</h1>
+    <p class="subtitle" id="home-subtitle">لعبة سريعة متعددة اللاعبين — اصنع مسارًا وتفادَ الاصطدام!</p>
+
+    <div class="mode-select" id="mode-select">
+      <button type="button" class="mode-card active" data-mode="tron">
+        <span class="mode-icon">🏍️</span>
+        <span class="mode-name">دراجات الضوء</span>
+        <span class="mode-desc">تنافسي · حتى 6 لاعبين</span>
+      </button>
+      <button type="button" class="mode-card" data-mode="coop">
+        <span class="mode-icon">💎</span>
+        <span class="mode-name">غزو الجواهر</span>
+        <span class="mode-desc">تعاوني · حتى 4 لاعبين</span>
+      </button>
+    </div>
 
     <label class="field">
       <span>اسمك</span>
@@ -47,7 +60,8 @@
 <!-- شاشة الانتظار -->
 <section id="screen-lobby" class="screen">
   <div class="card">
-    <h2>غرفة الانتظار</h2>
+    <h2 id="lobby-title">غرفة الانتظار</h2>
+    <p class="subtitle" id="lobby-mode-hint"></p>
     <p class="subtitle">شارك هذا الرمز مع أصدقائك:</p>
     <div id="room-code" class="room-code">----</div>
 
@@ -61,6 +75,12 @@
 <!-- شاشة اللعبة -->
 <section id="screen-game" class="screen">
   <div id="hud" class="hud"></div>
+  <div id="coop-hud" class="coop-hud hidden">
+    <span class="coop-chip">💎 <b id="coop-score">0</b></span>
+    <span class="coop-chip">❤️ <b id="coop-lives">0</b></span>
+    <span class="coop-chip">🚀 <span id="coop-level">1</span></span>
+  </div>
+  <div id="toast" class="toast"></div>
   <canvas id="game-canvas"></canvas>
 
   <div id="overlay" class="overlay hidden">

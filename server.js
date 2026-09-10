@@ -4,10 +4,26 @@ const path = require('path');
 const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3000;
+
+// ---- وضع دراجات الضوء (تنافسي) ----
 const GRID_W = 44;
 const GRID_H = 28;
 const TICK_MS = 110;
 const MAX_PLAYERS = 6;
+
+// ---- وضع غزو الجواهر (تعاوني) ----
+const COOP_GRID_W = 24;
+const COOP_GRID_H = 16;
+const COOP_TICK_START = 160;
+const COOP_TICK_MIN = 90;
+const COOP_TICK_STEP = 8;
+const COOP_MAX_PLAYERS = 4;
+const COOP_START_LIVES = 5;
+const COOP_COIN_COUNT = 4;
+const COOP_OBSTACLES_START = 3;
+const COOP_OBSTACLES_MAX = 9;
+const COOP_LEVEL_STEP = 10;
+const COOP_RESPAWN_MS = 1400;
 
 const COLORS = ['#ff5252', '#40c4ff', '#69f0ae', '#ffd740', '#e040fb', '#ff6e40'];
 const DIRS = {
@@ -39,6 +55,7 @@ function lobbyPayload(room) {
   return {
     type: 'lobby',
     code: room.code,
+    mode: room.mode,
     players: [...room.players.values()].map((p) => ({
       id: p.id,
       name: p.name,
@@ -47,6 +64,16 @@ function lobbyPayload(room) {
     })),
   };
 }
+
+function maxPlayersFor(mode) {
+  return mode === 'coop' ? COOP_MAX_PLAYERS : MAX_PLAYERS;
+}
+
+function minPlayersFor(mode) {
+  return mode === 'coop' ? 1 : 2;
+}
+
+// ======================= دراجات الضوء (تنافسي) =======================
 
 function startPositions(n) {
   const cx = GRID_W / 2;
@@ -83,11 +110,11 @@ function resetRound(room) {
   room.status = 'playing';
 }
 
-function startGame(room) {
-  if (room.players.size < 2) return;
+function startTronGame(room) {
   resetRound(room);
   broadcast(room, {
     type: 'start',
+    mode: 'tron',
     grid: { w: GRID_W, h: GRID_H },
     players: [...room.players.values()].map((p) => ({
       id: p.id,
@@ -99,20 +126,21 @@ function startGame(room) {
     })),
   });
   if (room.interval) clearInterval(room.interval);
-  room.interval = setInterval(() => tick(room), TICK_MS);
+  room.interval = setInterval(() => tickTron(room), TICK_MS);
 }
 
-function endRound(room, winner) {
+function endTronRound(room, winner) {
   room.status = 'lobby';
   clearInterval(room.interval);
   room.interval = null;
   broadcast(room, {
     type: 'gameover',
+    mode: 'tron',
     winner: winner ? { id: winner.id, name: winner.name, color: winner.color } : null,
   });
 }
 
-function tick(room) {
+function tickTron(room) {
   const alivePlayers = [...room.players.values()].filter((p) => p.alive);
   const nextHeads = new Map();
 
@@ -149,12 +177,211 @@ function tick(room) {
     }
   }
 
-  broadcast(room, { type: 'tick', players: events });
+  broadcast(room, { type: 'tick', mode: 'tron', players: events });
 
   const stillAlive = [...room.players.values()].filter((p) => p.alive);
   if (stillAlive.length <= 1) {
-    endRound(room, stillAlive[0] || null);
+    endTronRound(room, stillAlive[0] || null);
   }
+}
+
+// ======================= غزو الجواهر (تعاوني) =======================
+
+function coopFreeCell(room, avoid) {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const x = Math.floor(Math.random() * COOP_GRID_W);
+    const y = Math.floor(Math.random() * COOP_GRID_H);
+    const key = `${x},${y}`;
+    if (avoid.has(key)) continue;
+    return { x, y };
+  }
+  return { x: Math.floor(COOP_GRID_W / 2), y: Math.floor(COOP_GRID_H / 2) };
+}
+
+function coopOccupied(room) {
+  const occ = new Set();
+  for (const p of room.players.values()) occ.add(`${p.x},${p.y}`);
+  for (const o of room.obstacles) occ.add(`${o.x},${o.y}`);
+  for (const c of room.coins) occ.add(`${c.x},${c.y}`);
+  return occ;
+}
+
+function coopSpawnCoin(room) {
+  const cell = coopFreeCell(room, coopOccupied(room));
+  room.coins.push(cell);
+}
+
+function coopSpawnObstacle(room) {
+  const cell = coopFreeCell(room, coopOccupied(room));
+  const dirs = [-1, 0, 1];
+  let dx = 0, dy = 0;
+  while (dx === 0 && dy === 0) {
+    dx = dirs[Math.floor(Math.random() * 3)];
+    dy = dirs[Math.floor(Math.random() * 3)];
+  }
+  room.obstacles.push({ x: cell.x, y: cell.y, dx, dy });
+}
+
+function coopStartPositions(n) {
+  const spots = [
+    { x: 2, y: 2 },
+    { x: COOP_GRID_W - 3, y: 2 },
+    { x: 2, y: COOP_GRID_H - 3 },
+    { x: COOP_GRID_W - 3, y: COOP_GRID_H - 3 },
+  ];
+  return spots.slice(0, n);
+}
+
+function coopResetRound(room) {
+  const ids = [...room.players.keys()];
+  const positions = coopStartPositions(ids.length);
+  ids.forEach((id, i) => {
+    const p = room.players.get(id);
+    p.x = positions[i].x;
+    p.y = positions[i].y;
+    p.dir = 'right';
+    p.nextDir = 'right';
+    p.down = false;
+    p.downTicks = 0;
+  });
+  room.coins = [];
+  room.obstacles = [];
+  room.score = 0;
+  room.level = 1;
+  room.lives = COOP_START_LIVES;
+  room.tickMs = COOP_TICK_START;
+  for (let i = 0; i < COOP_COIN_COUNT; i++) coopSpawnCoin(room);
+  for (let i = 0; i < COOP_OBSTACLES_START; i++) coopSpawnObstacle(room);
+  room.status = 'playing';
+}
+
+function startCoopGame(room) {
+  coopResetRound(room);
+  broadcast(room, {
+    type: 'start',
+    mode: 'coop',
+    grid: { w: COOP_GRID_W, h: COOP_GRID_H },
+    players: [...room.players.values()].map((p) => ({
+      id: p.id,
+      name: p.name,
+      color: p.color,
+      x: p.x,
+      y: p.y,
+      dir: p.dir,
+    })),
+    coins: room.coins,
+    obstacles: room.obstacles,
+    score: room.score,
+    lives: room.lives,
+    level: room.level,
+    tickMs: room.tickMs,
+  });
+  coopScheduleTick(room);
+}
+
+function coopScheduleTick(room) {
+  if (room.interval) clearInterval(room.interval);
+  room.interval = setInterval(() => tickCoop(room), room.tickMs);
+}
+
+function endCoopRound(room) {
+  room.status = 'lobby';
+  clearInterval(room.interval);
+  room.interval = null;
+  broadcast(room, { type: 'gameover', mode: 'coop', score: room.score, level: room.level });
+}
+
+function tickCoop(room) {
+  // تحريك الكويكبات وارتدادها عن الجدران
+  for (const o of room.obstacles) {
+    let nx = o.x + o.dx;
+    let ny = o.y + o.dy;
+    if (nx < 0 || nx >= COOP_GRID_W) { o.dx *= -1; nx = o.x + o.dx; }
+    if (ny < 0 || ny >= COOP_GRID_H) { o.dy *= -1; ny = o.y + o.dy; }
+    o.x = Math.max(0, Math.min(COOP_GRID_W - 1, nx));
+    o.y = Math.max(0, Math.min(COOP_GRID_H - 1, ny));
+  }
+  const obstacleCells = new Set(room.obstacles.map((o) => `${o.x},${o.y}`));
+
+  const events = [];
+  let leveledUp = false;
+
+  for (const p of room.players.values()) {
+    if (p.down) {
+      p.downTicks--;
+      if (p.downTicks <= 0) {
+        const cell = coopFreeCell(room, coopOccupied(room));
+        p.x = cell.x;
+        p.y = cell.y;
+        p.down = false;
+      }
+      events.push({ id: p.id, x: p.x, y: p.y, down: p.down, dir: p.dir });
+      continue;
+    }
+
+    if (p.nextDir) p.dir = p.nextDir;
+    const d = DIRS[p.dir];
+    const nx = p.x + d.x;
+    const ny = p.y + d.y;
+    const outOfBounds = nx < 0 || nx >= COOP_GRID_W || ny < 0 || ny >= COOP_GRID_H;
+    const hitObstacle = !outOfBounds && obstacleCells.has(`${nx},${ny}`);
+
+    if (outOfBounds || hitObstacle) {
+      room.lives--;
+      p.down = true;
+      p.downTicks = Math.max(1, Math.round(COOP_RESPAWN_MS / room.tickMs));
+      events.push({ id: p.id, x: p.x, y: p.y, down: true, dir: p.dir });
+      continue;
+    }
+
+    p.x = nx;
+    p.y = ny;
+
+    const coinIdx = room.coins.findIndex((c) => c.x === p.x && c.y === p.y);
+    if (coinIdx !== -1) {
+      room.coins.splice(coinIdx, 1);
+      room.score++;
+      coopSpawnCoin(room);
+      const newLevel = 1 + Math.floor(room.score / COOP_LEVEL_STEP);
+      if (newLevel > room.level) {
+        room.level = newLevel;
+        room.tickMs = Math.max(COOP_TICK_MIN, COOP_TICK_START - (room.level - 1) * COOP_TICK_STEP);
+        if (room.obstacles.length < COOP_OBSTACLES_MAX) coopSpawnObstacle(room);
+        leveledUp = true;
+      }
+    }
+
+    events.push({ id: p.id, x: p.x, y: p.y, down: false, dir: p.dir });
+  }
+
+  broadcast(room, {
+    type: 'tick',
+    mode: 'coop',
+    players: events,
+    coins: room.coins,
+    obstacles: room.obstacles,
+    score: room.score,
+    lives: room.lives,
+    level: room.level,
+    tickMs: room.tickMs,
+  });
+
+  if (room.lives <= 0) {
+    endCoopRound(room);
+    return;
+  }
+  if (leveledUp) {
+    broadcast(room, { type: 'levelup', level: room.level, score: room.score });
+    coopScheduleTick(room);
+  }
+}
+
+// ======================= اتصال WebSocket المشترك =======================
+
+function startGame(room) {
+  if (room.players.size < minPlayersFor(room.mode)) return;
+  if (room.mode === 'coop') startCoopGame(room);
+  else startTronGame(room);
 }
 
 function removePlayer(ws) {
@@ -175,9 +402,11 @@ function removePlayer(ws) {
   }
 
   if (room.status === 'playing') {
-    const stillAlive = [...room.players.values()].filter((pl) => pl.alive);
-    if (stillAlive.length <= 1) {
-      endRound(room, stillAlive[0] || null);
+    if (room.mode === 'tron') {
+      const stillAlive = [...room.players.values()].filter((pl) => pl.alive);
+      if (stillAlive.length <= 1) endTronRound(room, stillAlive[0] || null);
+    } else if (room.players.size === 0) {
+      endCoopRound(room);
     }
   }
 
@@ -189,6 +418,7 @@ wss.on('connection', (ws, req) => {
   const action = url.searchParams.get('action');
   const code = (url.searchParams.get('code') || '').toUpperCase();
   const name = (url.searchParams.get('name') || 'لاعب').slice(0, 12);
+  const modeParam = url.searchParams.get('mode') === 'coop' ? 'coop' : 'tron';
 
   if (!/^[A-Z]{4}$/.test(code) || (action !== 'create' && action !== 'join')) {
     send(ws, { type: 'error', code: 'BAD_REQUEST', message: 'طلب غير صالح' });
@@ -202,17 +432,31 @@ wss.on('connection', (ws, req) => {
       ws.close();
       return;
     }
-    const room = { code, hostId: null, players: new Map(), status: 'lobby', interval: null, trailSet: new Set() };
+    const room = {
+      code,
+      mode: modeParam,
+      hostId: null,
+      players: new Map(),
+      status: 'lobby',
+      interval: null,
+      trailSet: new Set(),
+      coins: [],
+      obstacles: [],
+      score: 0,
+      level: 1,
+      lives: 0,
+      tickMs: COOP_TICK_START,
+    };
     rooms.set(code, room);
 
     const playerId = Math.random().toString(36).slice(2, 10);
     const color = COLORS[0];
-    room.players.set(playerId, { id: playerId, name, color, ws, alive: true });
+    room.players.set(playerId, { id: playerId, name, color, ws, alive: true, down: false });
     room.hostId = playerId;
     ws.roomCode = code;
     ws.playerId = playerId;
 
-    send(ws, { type: 'created', code, playerId, color });
+    send(ws, { type: 'created', code, playerId, color, mode: room.mode });
     broadcast(room, lobbyPayload(room));
   } else {
     const room = rooms.get(code);
@@ -226,7 +470,7 @@ wss.on('connection', (ws, req) => {
       ws.close();
       return;
     }
-    if (room.players.size >= MAX_PLAYERS) {
+    if (room.players.size >= maxPlayersFor(room.mode)) {
       send(ws, { type: 'error', code: 'FULL', message: 'الغرفة ممتلئة' });
       ws.close();
       return;
@@ -235,11 +479,11 @@ wss.on('connection', (ws, req) => {
     const playerId = Math.random().toString(36).slice(2, 10);
     const usedColors = new Set([...room.players.values()].map((p) => p.color));
     const color = COLORS.find((c) => !usedColors.has(c)) || COLORS[room.players.size % COLORS.length];
-    room.players.set(playerId, { id: playerId, name, color, ws, alive: true });
+    room.players.set(playerId, { id: playerId, name, color, ws, alive: true, down: false });
     ws.roomCode = code;
     ws.playerId = playerId;
 
-    send(ws, { type: 'joined', code, playerId, color });
+    send(ws, { type: 'joined', code, playerId, color, mode: room.mode });
     broadcast(room, lobbyPayload(room));
   }
 
@@ -262,9 +506,14 @@ wss.on('connection', (ws, req) => {
     if (msg.type === 'restart' && room.hostId === ws.playerId) {
       startGame(room);
     }
-    if (msg.type === 'dir' && room.status === 'playing') {
+    if (msg.type === 'dir' && room.status === 'playing' && DIRS[msg.dir]) {
       const p = room.players.get(ws.playerId);
-      if (p && p.alive && DIRS[msg.dir]) p.nextDir = msg.dir;
+      if (!p) return;
+      if (room.mode === 'tron') {
+        if (p.alive) p.nextDir = msg.dir;
+      } else if (!p.down) {
+        p.nextDir = msg.dir;
+      }
     }
   });
 

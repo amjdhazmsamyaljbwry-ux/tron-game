@@ -86,6 +86,32 @@ h2 { margin: 0 0 10px; }
 
 .divider { color: var(--muted); font-size: 0.8rem; margin: 8px 0 16px; }
 
+.mode-select {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.mode-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: #0e1526;
+  border: 1px solid #2a3a63;
+  border-radius: 12px;
+  padding: 12px 8px;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, transform .1s ease;
+}
+.mode-card:active { transform: scale(0.97); }
+.mode-card .mode-icon { font-size: 1.6rem; }
+.mode-card .mode-name { font-weight: 700; font-size: 0.9rem; }
+.mode-card .mode-desc { font-size: 0.7rem; color: var(--muted); }
+.mode-card.active { border-color: var(--accent); background: rgba(64,196,255,0.12); }
+.mode-card.active .mode-desc { color: var(--accent); }
+
 .error { color: #ff6b6b; min-height: 1.2em; font-size: 0.9rem; }
 
 .room-code {
@@ -152,7 +178,47 @@ h2 { margin: 0 0 10px; }
   gap: 6px;
 }
 .hud .chip.dead { opacity: 0.35; text-decoration: line-through; }
+.hud .chip.down { opacity: 0.45; }
 .hud .chip .dot { width: 10px; height: 10px; border-radius: 50%; }
+
+.coop-hud {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 8px) + 38px);
+  right: 10px;
+  left: 10px;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  z-index: 5;
+  pointer-events: none;
+}
+.coop-chip {
+  background: rgba(19,26,42,0.85);
+  border: 1px solid #4a3a7a;
+  border-radius: 20px;
+  padding: 4px 14px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #ffd740;
+}
+
+.toast {
+  position: absolute;
+  top: 86px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(19,26,42,0.92);
+  border: 1px solid var(--accent-2);
+  color: var(--accent-2);
+  font-weight: 700;
+  padding: 8px 18px;
+  border-radius: 999px;
+  z-index: 6;
+  opacity: 0;
+  transition: opacity .25s ease, transform .25s ease;
+  pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(6px); }
 
 #game-canvas {
   width: 100%;
@@ -178,6 +244,7 @@ h2 { margin: 0 0 10px; }
   left: 0;
   right: 0;
   display: flex;
+  direction: ltr;
   justify-content: center;
   align-items: center;
   gap: 14px;
