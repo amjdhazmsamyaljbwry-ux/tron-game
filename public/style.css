@@ -266,6 +266,27 @@ h2 { margin: 0 0 10px; }
 
 .hidden { display: none !important; }
 
+.music-btn {
+  position: fixed;
+  top: env(safe-area-inset-top, 8px);
+  left: 8px;
+  z-index: 50;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(19,26,42,0.85);
+  border: 1px solid #2a3a63;
+  color: var(--text);
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.music-btn.on { border-color: var(--accent-2); color: var(--accent-2); }
+
+.pad-btn.active-hold { background: rgba(224,64,251,0.35); border-color: #e040fb; }
+
 @media (min-width: 700px) {
   .controls { opacity: 0.6; }
 }

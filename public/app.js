@@ -9,9 +9,12 @@
   const CATS_JUMP_V = -16;
   const CATS_MOVE_SPEED = 5;
   const CATS_MAX_FALL = 18;
+  const CATS_BOUNCE_V = -25;
+  const CATS_ICE_ACCEL = 0.15;
+  const CATS_CRUMBLE_DELAY_CLIENT = 20;
   const CAT_W = 30;
   const CAT_H = 30;
-  const localPred = { x: 0, y: 0, vx: 0, vy: 0, grounded: false };
+  const localPred = { x: 0, y: 0, vx: 0, vy: 0, grounded: false, standingType: null, trapped: false };
   let predAccum = 0;
   let predLastNow = 0;
 
@@ -23,6 +26,7 @@
     let newX = localPred.x + localPred.vx;
     const rectX = { x: newX, y: localPred.y, w: CAT_W, h: CAT_H };
     for (const pl of catsPlatforms) {
+      if (pl.broken) continue;
       if (aabbOverlapLocal(rectX, pl)) {
         if (localPred.vx > 0) newX = pl.x - CAT_W;
         else if (localPred.vx < 0) newX = pl.x + pl.w;
@@ -34,24 +38,34 @@
     let newY = localPred.y + localPred.vy;
     const rectY = { x: localPred.x, y: newY, w: CAT_W, h: CAT_H };
     let grounded = false;
+    let standingType = null;
     for (const pl of catsPlatforms) {
+      if (pl.broken) continue;
       if (aabbOverlapLocal(rectY, pl)) {
-        if (localPred.vy > 0) { newY = pl.y - CAT_H; grounded = true; }
+        if (localPred.vy > 0) { newY = pl.y - CAT_H; grounded = true; standingType = pl.type; }
         else if (localPred.vy < 0) { newY = pl.y + pl.h; }
         localPred.vy = 0;
       }
     }
     localPred.y = newY;
     localPred.grounded = grounded;
+    if (standingType === 'bounce') {
+      localPred.vy = CATS_BOUNCE_V;
+      localPred.grounded = false;
+    }
+    localPred.standingType = standingType;
   }
 
   function stepLocalPrediction(now) {
-    if (predLastNow === 0) predLastNow = now;
+    if (predLastNow === 0) { predLastNow = now; return; }
     predAccum += now - predLastNow;
     predLastNow = now;
+    if (localPred.trapped) { predAccum = 0; return; }
     let steps = 0;
     while (predAccum >= CATS_TICK_MS && steps < 5) {
-      localPred.vx = (heldRight && !heldLeft ? 1 : heldLeft && !heldRight ? -1 : 0) * CATS_MOVE_SPEED;
+      const targetVx = (heldRight && !heldLeft ? 1 : heldLeft && !heldRight ? -1 : 0) * CATS_MOVE_SPEED;
+      if (localPred.standingType === 'ice') localPred.vx += (targetVx - localPred.vx) * CATS_ICE_ACCEL;
+      else localPred.vx = targetVx;
       localPred.vy = Math.min(localPred.vy + CATS_GRAVITY, CATS_MAX_FALL);
       localCatsStep();
       predAccum -= CATS_TICK_MS;
@@ -100,6 +114,8 @@
   const btnRestart = document.getElementById('btn-restart');
   const padUp = document.getElementById('pad-up');
   const padDown = document.getElementById('pad-down');
+  const padPull = document.getElementById('pad-pull');
+  const musicToggle = document.getElementById('music-toggle');
 
   const MODE_INFO = {
     tron: { subtitle: 'لعبة سريعة متعددة اللاعبين — عالم أكبر، دروع، ومنطقة تضيق كلما طال القتال!' },
@@ -113,6 +129,7 @@
       selectedMode = card.dataset.mode;
       modeSelect.querySelectorAll('.mode-card').forEach((c) => c.classList.toggle('active', c === card));
       document.getElementById('home-subtitle').textContent = MODE_INFO[selectedMode].subtitle;
+      setMusicMood(selectedMode);
     });
   });
 
@@ -147,13 +164,17 @@
   let catsWorld = { w: 2600, h: 760 };
   let catsPlatforms = [];
   let catsSpikes = [];
+  let catsWindzones = [];
   let catsCheckpoints = [];
   let catsFinishX = 0;
   let catsYarns = [];
   let catsScore = 0;
+  let catsCombo = 0;
   let catsStartTs = 0;
   let catsFinalTimeMs = null;
   let camX = 0, camY = 0;
+  let screenShake = 0;
+  let pulling = false;
 
   const savedName = localStorage.getItem('tron_name') || '';
   nameInput.value = savedName;
@@ -280,23 +301,29 @@
       currentMode = msg.mode || currentMode;
       resetHeldMoveState();
       padDown.classList.toggle('hidden', currentMode === 'cats');
+      padPull.classList.toggle('hidden', currentMode !== 'cats');
       padUp.textContent = currentMode === 'cats' ? '⤴' : '▲';
+      setMusicMood(currentMode);
 
       if (currentMode === 'cats') {
         catsWorld = msg.world;
         catsPlatforms = msg.platforms;
         catsSpikes = msg.spikes;
+        catsWindzones = msg.windzones || [];
         catsCheckpoints = msg.checkpoints;
         catsFinishX = msg.finishX;
         catsYarns = msg.yarns || [];
         catsScore = msg.score || 0;
+        catsCombo = 0;
         catsFinalTimeMs = null;
         catsStartTs = performance.now();
         currentTickMs = CATS_TICK_MS;
+        pulling = false;
+        screenShake = 0;
         players = new Map();
         msg.players.forEach((p) => {
           players.set(p.id, {
-            name: p.name, color: p.color, facing: p.facing || 'right', grounded: false,
+            name: p.name, color: p.color, facing: p.facing || 'right', grounded: false, trapped: false,
             x: p.x, y: p.y, prevX: p.x, prevY: p.y, lastTick: performance.now(),
           });
         });
@@ -306,6 +333,7 @@
         const me = msg.players.find((p) => p.id === myId);
         if (me) {
           localPred.x = me.x; localPred.y = me.y; localPred.vx = 0; localPred.vy = 0; localPred.grounded = false;
+          localPred.trapped = false; localPred.standingType = null;
         }
         predAccum = 0; predLastNow = 0;
       } else {
@@ -355,15 +383,22 @@
         if (ev.dir) p.dir = ev.dir;
         if (ev.facing) p.facing = ev.facing;
         if ('grounded' in ev) p.grounded = ev.grounded;
+        if ('trapped' in ev) p.trapped = ev.trapped;
+        if (ev.impact) screenShake = 8;
         p.lastTick = now;
 
         if (currentMode === 'cats' && ev.id === myId) {
-          const dist = Math.hypot(ev.x - localPred.x, ev.y - localPred.y);
-          if (dist > 60) {
-            localPred.x = ev.x; localPred.y = ev.y; localPred.vy = 0;
+          localPred.trapped = !!ev.trapped;
+          if (!localPred.trapped) {
+            const dist = Math.hypot(ev.x - localPred.x, ev.y - localPred.y);
+            if (dist > 60) {
+              localPred.x = ev.x; localPred.y = ev.y; localPred.vy = 0;
+            } else {
+              localPred.x += (ev.x - localPred.x) * 0.15;
+              localPred.y += (ev.y - localPred.y) * 0.15;
+            }
           } else {
-            localPred.x += (ev.x - localPred.x) * 0.15;
-            localPred.y += (ev.y - localPred.y) * 0.15;
+            localPred.x = ev.x; localPred.y = ev.y; localPred.vx = 0; localPred.vy = 0;
           }
           localPred.grounded = ev.grounded;
         }
@@ -382,7 +417,10 @@
         updateCoopHud();
       } else if (currentMode === 'cats') {
         catsYarns = msg.yarns || catsYarns;
+        if (msg.platforms) catsPlatforms = msg.platforms;
+        if (msg.score > catsScore && msg.combo > 1) showToast(`🧶 سلسلة x${msg.combo}!`);
         catsScore = msg.score;
+        catsCombo = msg.combo || 0;
         catsScoreEl.textContent = catsScore;
       }
       renderHud();
@@ -391,12 +429,17 @@
     if (msg.type === 'levelup') showToast(`🎉 المستوى ${msg.level}!`);
     if (msg.type === 'checkpoint') showToast('🚩 نقطة تفتيش!');
     if (msg.type === 'hazard') showToast('💥 أُعدتم لآخر نقطة تفتيش!');
+    if (msg.type === 'rescue') {
+      showToast(msg.success ? '🤝 تم الإنقاذ!' : '😿 سحبكم الوزن للحفرة!');
+      screenShake = msg.success ? 4 : 10;
+    }
 
     if (msg.type === 'gameover') {
       if (currentMode === 'cats') {
         catsFinalTimeMs = msg.timeMs;
         const seconds = (msg.timeMs / 1000).toFixed(1);
-        overlayTitle.innerHTML = `🎉 وصلتم معًا! <span style="color:#ffd740">${msg.score}/${msg.totalYarns} 🧶</span> في ${seconds} ثانية`;
+        const stars = '⭐'.repeat(msg.stars || 1) + '☆'.repeat(3 - (msg.stars || 1));
+        overlayTitle.innerHTML = `🎉 وصلتم معًا! <span style="color:#ffd740">${msg.score}/${msg.totalYarns} 🧶</span> في ${seconds} ثانية<br><span style="font-size:1.4rem">${stars}</span>`;
       } else if (currentMode === 'coop') {
         overlayTitle.innerHTML = `🛰️ انتهت المهمة — <span style="color:#ffd740">${msg.score} جوهرة</span> عند المستوى ${msg.level}`;
       } else if (msg.winner) {
@@ -727,9 +770,10 @@
     return { x: sx / n, y: sy / n };
   }
 
-  function drawCat(x, y, color, facing, down) {
+  function drawCat(x, y, color, facing, down, trapped, now) {
     const w = 30, h = 30;
-    const cx = x + w / 2, cy = y + h / 2;
+    const shake = trapped ? Math.sin((now || 0) / 60) * 2 : 0;
+    const cx = x + w / 2 + shake, cy = y + h / 2;
     ctx.save();
     ctx.translate(cx, cy);
     if (facing === 'left') ctx.scale(-1, 1);
@@ -768,6 +812,14 @@
     ctx.beginPath(); ctx.arc(5, -1, 2.4, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(13, -1, 2.4, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
+    if (trapped) {
+      ctx.save();
+      ctx.font = 'bold 16px sans-serif';
+      ctx.fillStyle = '#ffd740';
+      ctx.textAlign = 'center';
+      ctx.fillText('!', cx, cy - h);
+      ctx.restore();
+    }
   }
 
   function catsRenderPositions(now) {
@@ -775,10 +827,10 @@
     players.forEach((p, id) => {
       if (id === myId) {
         const facing = heldLeft && !heldRight ? 'left' : heldRight && !heldLeft ? 'right' : p.facing;
-        pos.set(id, { x: localPred.x, y: localPred.y, color: p.color, facing });
+        pos.set(id, { x: localPred.x, y: localPred.y, color: p.color, facing, trapped: p.trapped });
       } else {
         const t = Math.min(1, (now - p.lastTick) / currentTickMs);
-        pos.set(id, { x: p.prevX + (p.x - p.prevX) * t, y: p.prevY + (p.y - p.prevY) * t, color: p.color, facing: p.facing });
+        pos.set(id, { x: p.prevX + (p.x - p.prevX) * t, y: p.prevY + (p.y - p.prevY) * t, color: p.color, facing: p.facing, trapped: p.trapped });
       }
     });
     return pos;
@@ -806,8 +858,12 @@
       ctx.fill();
     });
 
+    const shakeX = screenShake > 0 ? (Math.random() - 0.5) * screenShake : 0;
+    const shakeY = screenShake > 0 ? (Math.random() - 0.5) * screenShake : 0;
+    if (screenShake > 0) screenShake = Math.max(0, screenShake - 0.5);
+
     ctx.save();
-    ctx.translate(-camX, -camY);
+    ctx.translate(-camX + shakeX, -camY + shakeY);
 
     catsCheckpoints.forEach((cp) => {
       const px = cp.x + cp.w / 2;
@@ -823,7 +879,80 @@
       ctx.fill();
     });
 
+    catsWindzones.forEach((wz) => {
+      for (let i = 0; i < 10; i++) {
+        const t = ((now / 400 + i / 10) % 1);
+        const wx = wz.x + t * wz.w;
+        const wy = wz.y + (i * 37 % wz.h);
+        ctx.strokeStyle = `rgba(255,255,255,${0.15 + 0.15 * Math.sin(now / 200 + i)})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(wx, wy);
+        ctx.lineTo(wx + Math.sin(now / 300 + i) * 26 + 20, wy);
+        ctx.stroke();
+      }
+    });
+
     catsPlatforms.forEach((pl) => {
+      if (pl.broken) return;
+      if (pl.type === 'pitfloor') {
+        ctx.fillStyle = '#3a1015';
+        ctx.fillRect(pl.x, pl.y, pl.w, pl.h);
+        ctx.fillStyle = '#ff6e40';
+        ctx.fillRect(pl.x, pl.y, pl.w, 4);
+        return;
+      }
+      if (pl.type === 'moving') {
+        ctx.fillStyle = '#2f3a6b';
+        ctx.fillRect(pl.x, pl.y, pl.w, Math.min(pl.h, 26));
+        ctx.fillStyle = '#40c4ff';
+        ctx.fillRect(pl.x, pl.y, pl.w, 6);
+        return;
+      }
+      if (pl.type === 'crumble') {
+        const wear = Math.min(1, (pl.standTicks || 0) / CATS_CRUMBLE_DELAY_CLIENT);
+        ctx.fillStyle = `rgb(${140 + wear * 90},${90 - wear * 40},${50 - wear * 30})`;
+        ctx.fillRect(pl.x, pl.y, pl.w, Math.min(pl.h, 26));
+        if (wear > 0.3) {
+          ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(pl.x + pl.w * 0.3, pl.y);
+          ctx.lineTo(pl.x + pl.w * 0.5, pl.y + Math.min(pl.h, 26));
+          ctx.moveTo(pl.x + pl.w * 0.7, pl.y);
+          ctx.lineTo(pl.x + pl.w * 0.55, pl.y + Math.min(pl.h, 26));
+          ctx.stroke();
+        }
+        return;
+      }
+      if (pl.type === 'bounce') {
+        ctx.fillStyle = '#1b5e20';
+        ctx.fillRect(pl.x, pl.y, pl.w, pl.h);
+        ctx.strokeStyle = '#69f0ae';
+        ctx.lineWidth = 2;
+        for (let sx = pl.x + 6; sx < pl.x + pl.w - 4; sx += 12) {
+          ctx.beginPath();
+          ctx.moveTo(sx, pl.y + pl.h);
+          ctx.lineTo(sx + 6, pl.y + 4);
+          ctx.stroke();
+        }
+        return;
+      }
+      if (pl.type === 'ice') {
+        ctx.fillStyle = '#4a6b7a';
+        ctx.fillRect(pl.x, pl.y, pl.w, Math.min(pl.h, 60));
+        const grad = ctx.createLinearGradient(pl.x, pl.y, pl.x, pl.y + 16);
+        grad.addColorStop(0, '#e0f7ff');
+        grad.addColorStop(1, '#8ecfe0');
+        ctx.fillStyle = grad;
+        ctx.fillRect(pl.x, pl.y, pl.w, 12);
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 1;
+        for (let sx = pl.x + 10; sx < pl.x + pl.w; sx += 26) {
+          ctx.beginPath(); ctx.moveTo(sx, pl.y + 2); ctx.lineTo(sx + 8, pl.y + 10); ctx.stroke();
+        }
+        return;
+      }
       ctx.fillStyle = '#6b4a2f';
       ctx.fillRect(pl.x, pl.y, pl.w, Math.min(pl.h, 60));
       ctx.fillStyle = '#4caf50';
@@ -894,7 +1023,7 @@
     }
 
     renderPos.forEach((p) => {
-      drawCat(p.x, p.y, p.color, p.facing, false);
+      drawCat(p.x, p.y, p.color, p.facing, false, p.trapped, now);
     });
 
     ctx.restore();
@@ -930,6 +1059,12 @@
     }
     send({ type: 'jump' });
   }
+  function setPulling(held) {
+    if (pulling === held) return;
+    pulling = held;
+    padPull.classList.toggle('active-hold', held);
+    send({ type: 'pull', held });
+  }
 
   const keyMap = {
     ArrowUp: 'up', KeyW: 'up',
@@ -938,10 +1073,12 @@
     ArrowRight: 'right', KeyD: 'right',
   };
   window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyM' && !e.repeat) { toggleMusic(); return; }
     if (currentMode === 'cats') {
       if (e.code === 'ArrowLeft' || e.code === 'KeyA') { e.preventDefault(); heldLeft = true; updateCatsMove(); }
       else if (e.code === 'ArrowRight' || e.code === 'KeyD') { e.preventDefault(); heldRight = true; updateCatsMove(); }
       else if (!e.repeat && (e.code === 'ArrowUp' || e.code === 'KeyW' || e.code === 'Space')) { e.preventDefault(); sendJump(); }
+      else if (e.code === 'KeyE') { e.preventDefault(); setPulling(true); }
       return;
     }
     const dir = keyMap[e.code];
@@ -954,6 +1091,7 @@
     if (currentMode !== 'cats') return;
     if (e.code === 'ArrowLeft' || e.code === 'KeyA') { heldLeft = false; updateCatsMove(); }
     else if (e.code === 'ArrowRight' || e.code === 'KeyD') { heldRight = false; updateCatsMove(); }
+    else if (e.code === 'KeyE') { setPulling(false); }
   });
 
   document.querySelectorAll('.pad-btn').forEach((btn) => {
@@ -979,6 +1117,9 @@
   });
   window.addEventListener('pointerup', () => { if (currentMode === 'cats') { heldLeft = false; heldRight = false; updateCatsMove(); } });
 
+  padPull.addEventListener('pointerdown', (e) => { e.preventDefault(); setPulling(true); });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => padPull.addEventListener(ev, () => setPulling(false)));
+
   let touchStart = null;
   canvas.addEventListener('touchstart', (e) => {
     if (currentMode === 'cats') return;
@@ -997,6 +1138,109 @@
   }, { passive: true });
 
   setInterval(() => { lastSentDir = null; }, BASE_TICK_MS);
+
+  // ---- الموسيقى الخلفية (مولّدة إجرائيًا، بلا ملفات صوتية خارجية) ----
+  const MUSIC_KEY = 'tron_music_on';
+  let musicOn = localStorage.getItem(MUSIC_KEY) === '1';
+  let audioCtx = null;
+  let musicGain = null;
+  let musicTimer = null;
+  let musicMood = 'home';
+  let musicStep = 0;
+
+  const MUSIC_MOODS = {
+    home: { tempo: 480, bassSemi: -19, scale: [0, 3, 5, 7, 10], filter: 1200, wave: 'triangle' },
+    tron: { tempo: 210, bassSemi: -31, scale: [0, 3, 5, 7, 8, 10], filter: 2400, wave: 'sawtooth' },
+    coop: { tempo: 300, bassSemi: -23, scale: [0, 2, 4, 7, 9], filter: 1900, wave: 'square' },
+    cats: { tempo: 260, bassSemi: -27, scale: [0, 2, 3, 5, 7, 9, 10], filter: 2000, wave: 'triangle' },
+  };
+
+  function noteFreq(semitones) {
+    return 220 * Math.pow(2, semitones / 12);
+  }
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      musicGain = audioCtx.createGain();
+      musicGain.gain.value = 0.16;
+      musicGain.connect(audioCtx.destination);
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function playMusicStep() {
+    if (!musicOn || !audioCtx) return;
+    const mood = MUSIC_MOODS[musicMood] || MUSIC_MOODS.home;
+    const now = audioCtx.currentTime;
+
+    const bassOsc = audioCtx.createOscillator();
+    const bassGain = audioCtx.createGain();
+    bassOsc.type = 'sine';
+    bassOsc.frequency.value = noteFreq(mood.bassSemi);
+    bassGain.gain.setValueAtTime(0.22, now);
+    bassGain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+    bassOsc.connect(bassGain).connect(musicGain);
+    bassOsc.start(now); bassOsc.stop(now + 0.25);
+
+    const degree = mood.scale[musicStep % mood.scale.length];
+    const octave = Math.floor(musicStep / mood.scale.length) % 2 === 0 ? 0 : 12;
+    const leadOsc = audioCtx.createOscillator();
+    const leadGain = audioCtx.createGain();
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = mood.filter;
+    leadOsc.type = mood.wave;
+    leadOsc.frequency.value = noteFreq(degree + octave);
+    const dur = mood.tempo / 1000;
+    leadGain.gain.setValueAtTime(0.0001, now);
+    leadGain.gain.linearRampToValueAtTime(0.11, now + 0.02);
+    leadGain.gain.exponentialRampToValueAtTime(0.0001, now + dur * 0.9);
+    leadOsc.connect(filter).connect(leadGain).connect(musicGain);
+    leadOsc.start(now); leadOsc.stop(now + dur);
+
+    musicStep++;
+  }
+
+  function scheduleMusic() {
+    clearInterval(musicTimer);
+    const mood = MUSIC_MOODS[musicMood] || MUSIC_MOODS.home;
+    musicTimer = setInterval(playMusicStep, mood.tempo);
+  }
+
+  function setMusicMood(mode) {
+    const key = MUSIC_MOODS[mode] ? mode : 'home';
+    if (musicMood === key) return;
+    musicMood = key;
+    musicStep = 0;
+    if (musicOn && audioCtx) scheduleMusic();
+  }
+
+  function toggleMusic() {
+    musicOn = !musicOn;
+    localStorage.setItem(MUSIC_KEY, musicOn ? '1' : '0');
+    musicToggle.textContent = musicOn ? '🔊' : '🔇';
+    musicToggle.classList.toggle('on', musicOn);
+    if (musicOn) {
+      ensureAudio();
+      scheduleMusic();
+    } else if (musicTimer) {
+      clearInterval(musicTimer);
+      musicTimer = null;
+    }
+  }
+
+  musicToggle.addEventListener('click', toggleMusic);
+  musicToggle.textContent = musicOn ? '🔊' : '🔇';
+  musicToggle.classList.toggle('on', musicOn);
+
+  function tryAutoResumeMusic() {
+    if (musicOn && !audioCtx) { ensureAudio(); scheduleMusic(); }
+    window.removeEventListener('pointerdown', tryAutoResumeMusic);
+    window.removeEventListener('keydown', tryAutoResumeMusic);
+  }
+  window.addEventListener('pointerdown', tryAutoResumeMusic);
+  window.addEventListener('keydown', tryAutoResumeMusic);
 
   if ('serviceWorker' in navigator) {
     let reloading = false;

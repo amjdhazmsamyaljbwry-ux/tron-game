@@ -35,34 +35,105 @@ const CAT_H = 30;
 const ROPE_LENGTH = 120;
 const CATS_COYOTE_TICKS = 6;
 const CATS_JUMP_BUFFER_TICKS = 6;
-const CATS_WORLD_W = 2600;
+const CATS_WORLD_W = 9700;
 const CATS_WORLD_H = 760;
-const CATS_PLATFORMS = [
+const CATS_BOUNCE_V = -25;
+const CATS_ICE_ACCEL = 0.15;
+const CATS_CRUMBLE_DELAY = 20;
+const CATS_CRUMBLE_RESPAWN = 90;
+const CATS_PULL_RANGE = 150;
+const CATS_PULL_SUCCESS_TICKS = 40;
+const CATS_DRAG_IN_TICKS = 55;
+const CATS_COMBO_WINDOW_TICKS = 45;
+const CATS_IMPACT_VY = 14;
+
+// المرحلة 0: البداية (تمهيدية)
+const CATS_PLATFORMS_BASE = [
   { x: 0, y: 560, w: 260, h: 200 },
   { x: 360, y: 560, w: 200, h: 200 },
   { x: 650, y: 480, w: 150, h: 200 },
   { x: 920, y: 560, w: 260, h: 200 },
   { x: 1270, y: 490, w: 120, h: 26 },
   { x: 1480, y: 420, w: 120, h: 26 },
-  { x: 1720, y: 560, w: 220, h: 200 },
+  { x: 1720, y: 560, w: 260, h: 200 },
   { x: 2040, y: 500, w: 150, h: 26 },
   { x: 2290, y: 560, w: 270, h: 200 },
+  // المرحلة 1: المنصات المتأرجحة
+  { x: 2650, y: 520, w: 110, h: 26, type: 'moving', axis: 'x', range: 80, speed: 0.05, phase: 0 },
+  { x: 2950, y: 470, w: 110, h: 26, type: 'moving', axis: 'y', range: 90, speed: 0.04, phase: 1.5 },
+  { x: 3200, y: 520, w: 110, h: 26, type: 'moving', axis: 'x', range: 70, speed: 0.06, phase: 3 },
+  { x: 3400, y: 560, w: 200, h: 200 },
+  // المرحلة 2: الجسر المنهار
+  { x: 3650, y: 520, w: 90, h: 26, type: 'crumble' },
+  { x: 3780, y: 520, w: 90, h: 26, type: 'crumble' },
+  { x: 3910, y: 520, w: 90, h: 26, type: 'crumble' },
+  { x: 4040, y: 520, w: 90, h: 26, type: 'crumble' },
+  { x: 4170, y: 520, w: 90, h: 26, type: 'crumble' },
+  { x: 4250, y: 560, w: 200, h: 200 },
+  // المرحلة 3: أبراج القفز المرن
+  { x: 4450, y: 560, w: 100, h: 200 },
+  { x: 4600, y: 545, w: 70, h: 20, type: 'bounce' },
+  { x: 4700, y: 430, w: 70, h: 20, type: 'bounce' },
+  { x: 4850, y: 340, w: 90, h: 26 },
+  { x: 5000, y: 430, w: 70, h: 20, type: 'bounce' },
+  { x: 5150, y: 545, w: 70, h: 20, type: 'bounce' },
+  { x: 5250, y: 560, w: 200, h: 200 },
+  // المرحلة 4: وادي الرياح
+  { x: 5450, y: 560, w: 100, h: 200 },
+  { x: 5480, y: 520, w: 110, h: 26 },
+  { x: 5680, y: 520, w: 110, h: 26 },
+  { x: 5880, y: 520, w: 110, h: 26 },
+  { x: 6080, y: 520, w: 110, h: 26 },
+  { x: 6150, y: 560, w: 100, h: 200 },
+  // المرحلة 5: الجليد الزلق
+  { x: 6250, y: 560, w: 220, h: 200, type: 'ice' },
+  { x: 6560, y: 560, w: 220, h: 200, type: 'ice' },
+  { x: 6870, y: 560, w: 230, h: 200, type: 'ice' },
+  { x: 7100, y: 560, w: 80, h: 200 },
+  // المرحلة 6: حفر الإنقاذ
+  { x: 7180, y: 560, w: 320, h: 200 },
+  { x: 7480, y: 700, w: 190, h: 60, type: 'pitfloor', exitX: 7500, exitY: 490 },
+  { x: 7650, y: 560, w: 300, h: 200 },
+  { x: 7930, y: 700, w: 220, h: 60, type: 'pitfloor', exitX: 7960, exitY: 490 },
+  { x: 8130, y: 560, w: 250, h: 200 },
+  // المرحلة 7: السباق الأخير
+  { x: 8380, y: 560, w: 100, h: 200 },
+  { x: 8520, y: 520, w: 100, h: 26, type: 'moving', axis: 'x', range: 60, speed: 0.07, phase: 0 },
+  { x: 8700, y: 545, w: 70, h: 20, type: 'bounce' },
+  { x: 8800, y: 420, w: 110, h: 26 },
+  { x: 8980, y: 560, w: 200, h: 200, type: 'ice' },
+  { x: 9200, y: 470, w: 100, h: 26, type: 'moving', axis: 'y', range: 70, speed: 0.05, phase: 2 },
+  { x: 9330, y: 560, w: 270, h: 200 },
 ];
 const CATS_SPIKES = [
   { x: 1030, y: 530, w: 40, h: 30 },
-  { x: 1800, y: 530, w: 40, h: 30 },
+  { x: 1870, y: 530, w: 40, h: 30 },
+  { x: 6650, y: 530, w: 40, h: 30 },
+];
+const CATS_WINDZONES = [
+  { rect: { x: 5450, y: 380, w: 700, h: 200 }, strength: 2.4, freq: 0.03, phase: 0 },
 ];
 const CATS_CHECKPOINTS = [
   { zone: { x: 380, y: 400, w: 60, h: 160 }, spawn: { x: 400, y: 500 } },
   { zone: { x: 930, y: 400, w: 60, h: 160 }, spawn: { x: 950, y: 500 } },
   { zone: { x: 1730, y: 400, w: 60, h: 160 }, spawn: { x: 1750, y: 500 } },
-  { zone: { x: 2300, y: 400, w: 60, h: 160 }, spawn: { x: 2320, y: 500 } },
+  { zone: { x: 3410, y: 400, w: 60, h: 160 }, spawn: { x: 3430, y: 500 } },
+  { zone: { x: 4260, y: 400, w: 60, h: 160 }, spawn: { x: 4280, y: 500 } },
+  { zone: { x: 5260, y: 400, w: 60, h: 160 }, spawn: { x: 5280, y: 500 } },
+  { zone: { x: 6160, y: 400, w: 60, h: 160 }, spawn: { x: 6180, y: 500 } },
+  { zone: { x: 7110, y: 400, w: 60, h: 160 }, spawn: { x: 7130, y: 500 } },
+  { zone: { x: 8140, y: 400, w: 60, h: 160 }, spawn: { x: 8160, y: 500 } },
 ];
 const CATS_YARNS = [
   { x: 460, y: 520 }, { x: 780, y: 440 }, { x: 1030, y: 500 },
   { x: 1330, y: 450 }, { x: 2100, y: 460 }, { x: 2420, y: 520 },
+  { x: 2820, y: 480 }, { x: 3150, y: 480 }, { x: 3900, y: 480 },
+  { x: 4850, y: 300 }, { x: 5780, y: 480 }, { x: 6700, y: 500 },
+  { x: 7800, y: 480 }, { x: 8850, y: 380 }, { x: 9250, y: 430 },
 ];
-const CATS_FINISH_X = 2470;
+const CATS_FINISH_X = 9500;
+const CATS_GOLD_MS = 150000;
+const CATS_SILVER_MS = 270000;
 
 const COLORS = ['#ff5252', '#40c4ff', '#69f0ae', '#ffd740', '#e040fb', '#ff6e40'];
 const DIRS = {
@@ -143,6 +214,10 @@ export class GameRoom {
     this.spawnPoint = { x: 30, y: 480 };
     this.yarns = [];
     this.catsTick = 0;
+    this.catsPlatforms = [];
+    this.pitState = [];
+    this.combo = 0;
+    this.lastYarnTick = -9999;
     this.tickTimer = null;
   }
 
@@ -177,7 +252,8 @@ export class GameRoom {
       id: null, name, color, ws,
       alive: true, down: false, shield: false,
       x: 0, y: 0, vx: 0, vy: 0, grounded: false, moveDir: 0, facing: 'right',
-      coyoteTicks: 0, jumpBufferTicks: 0,
+      coyoteTicks: 0, jumpBufferTicks: 0, standingIdx: -1, standingType: null,
+      trapped: false, pulling: false, trappedPitIdx: -1,
     };
   }
 
@@ -276,7 +352,7 @@ export class GameRoom {
     }
     if (msg.type === 'jump' && this.status === 'playing' && this.mode === 'cats') {
       const p = this.players.get(playerId);
-      if (p) {
+      if (p && !p.trapped) {
         if (p.grounded || p.coyoteTicks > 0) {
           p.vy = CATS_JUMP_V;
           p.grounded = false;
@@ -286,6 +362,10 @@ export class GameRoom {
           p.jumpBufferTicks = CATS_JUMP_BUFFER_TICKS;
         }
       }
+    }
+    if (msg.type === 'pull' && this.status === 'playing' && this.mode === 'cats') {
+      const p = this.players.get(playerId);
+      if (p) p.pulling = !!msg.held;
     }
   }
 
@@ -702,6 +782,7 @@ export class GameRoom {
     let newX = p.x + p.vx;
     const rectX = { x: newX, y: p.y, w: CAT_W, h: CAT_H };
     for (const pl of platforms) {
+      if (pl.broken) continue;
       if (aabbOverlap(rectX, pl)) {
         if (p.vx > 0) newX = pl.x - CAT_W;
         else if (p.vx < 0) newX = pl.x + pl.w;
@@ -713,15 +794,31 @@ export class GameRoom {
     let newY = p.y + p.vy;
     const rectY = { x: p.x, y: newY, w: CAT_W, h: CAT_H };
     let grounded = false;
-    for (const pl of platforms) {
+    let standingIdx = -1;
+    for (let i = 0; i < platforms.length; i++) {
+      const pl = platforms[i];
+      if (pl.broken) continue;
       if (aabbOverlap(rectY, pl)) {
-        if (p.vy > 0) { newY = pl.y - CAT_H; grounded = true; }
+        if (p.vy > 0) { newY = pl.y - CAT_H; grounded = true; standingIdx = i; }
         else if (p.vy < 0) { newY = pl.y + pl.h; }
         p.vy = 0;
       }
     }
     p.y = newY;
     p.grounded = grounded;
+    p.standingIdx = standingIdx;
+  }
+
+  catsBuildPlatforms() {
+    return CATS_PLATFORMS_BASE.map((pl) => ({
+      ...pl,
+      type: pl.type || 'static',
+      baseX: pl.x,
+      baseY: pl.y,
+      broken: false,
+      standTicks: 0,
+      respawnTimer: 0,
+    }));
   }
 
   catsResetRound() {
@@ -730,7 +827,14 @@ export class GameRoom {
     this.spawnPoint = { x: 30, y: 480 };
     this.yarns = CATS_YARNS.map((y) => ({ ...y }));
     this.score = 0;
+    this.combo = 0;
+    this.lastYarnTick = -9999;
     this.catsTick = 0;
+    this.catsPlatforms = this.catsBuildPlatforms();
+    this.pitState = this.catsPlatforms
+      .map((pl, idx) => (pl.type === 'pitfloor' ? idx : -1))
+      .filter((idx) => idx !== -1)
+      .map((idx) => ({ idx, rescueProgress: 0, dragProgress: 0 }));
     ids.forEach((id, i) => {
       const p = this.players.get(id);
       p.x = this.spawnPoint.x + i * 24;
@@ -742,6 +846,10 @@ export class GameRoom {
       p.facing = 'right';
       p.coyoteTicks = 0;
       p.jumpBufferTicks = 0;
+      p.standingIdx = -1;
+      p.trapped = false;
+      p.trappedPitIdx = -1;
+      p.pulling = false;
     });
     this.status = 'playing';
   }
@@ -753,8 +861,9 @@ export class GameRoom {
       type: 'start',
       mode: 'cats',
       world: { w: CATS_WORLD_W, h: CATS_WORLD_H },
-      platforms: CATS_PLATFORMS,
+      platforms: this.catsPlatforms,
       spikes: CATS_SPIKES,
+      windzones: CATS_WINDZONES.map((w) => w.rect),
       checkpoints: CATS_CHECKPOINTS.map((c) => c.zone),
       finishX: CATS_FINISH_X,
       players: ids.map((id) => {
@@ -772,27 +881,61 @@ export class GameRoom {
     this.status = 'lobby';
     clearInterval(this.tickTimer);
     this.tickTimer = null;
+    const timeMs = this.catsTick * CATS_TICK_MS;
+    const stars = timeMs <= CATS_GOLD_MS ? 3 : timeMs <= CATS_SILVER_MS ? 2 : 1;
     this.broadcast({
       type: 'gameover',
       mode: 'cats',
       score: this.score,
       totalYarns: CATS_YARNS.length,
-      timeMs: this.catsTick * CATS_TICK_MS,
+      timeMs,
+      stars,
     });
   }
 
   tickCats() {
     this.catsTick++;
+    const tick = this.catsTick;
     const ids = [...this.players.keys()];
     if (ids.length === 0) return;
+    const platforms = this.catsPlatforms;
 
+    for (const pl of platforms) {
+      if (pl.type === 'moving') {
+        const off = Math.sin(tick * pl.speed + pl.phase) * pl.range;
+        if (pl.axis === 'x') pl.x = pl.baseX + off;
+        else pl.y = pl.baseY + off;
+      } else if (pl.type === 'crumble') {
+        if (pl.broken) {
+          pl.respawnTimer--;
+          if (pl.respawnTimer <= 0) { pl.broken = false; pl.standTicks = 0; }
+        } else if (pl.standTicks > 0) {
+          pl.standTicks = Math.max(0, pl.standTicks - 1);
+        }
+      }
+    }
+
+    const impactIds = new Set();
     for (const id of ids) {
       const p = this.players.get(id);
+      if (p.trapped) { p.vx = 0; p.vy = 0; continue; }
+
       const wasGrounded = p.grounded;
-      p.vx = p.moveDir * CATS_MOVE_SPEED;
+      const targetVx = p.moveDir * CATS_MOVE_SPEED;
+      if (p.standingType === 'ice') p.vx += (targetVx - p.vx) * CATS_ICE_ACCEL;
+      else p.vx = targetVx;
       if (p.moveDir !== 0) p.facing = p.moveDir > 0 ? 'right' : 'left';
+
+      for (const wz of CATS_WINDZONES) {
+        const rect = { x: p.x, y: p.y, w: CAT_W, h: CAT_H };
+        if (aabbOverlap(rect, wz.rect)) {
+          p.vx += wz.strength * Math.sin(tick * wz.freq + wz.phase) * 0.15;
+        }
+      }
+
       p.vy = Math.min(p.vy + CATS_GRAVITY, CATS_MAX_FALL);
-      this.catsStep(p, CATS_PLATFORMS);
+      const prevVy = p.vy;
+      this.catsStep(p, platforms);
       p.x = Math.max(0, Math.min(CATS_WORLD_W - CAT_W, p.x));
 
       if (wasGrounded && !p.grounded) p.coyoteTicks = CATS_COYOTE_TICKS;
@@ -807,28 +950,121 @@ export class GameRoom {
           p.coyoteTicks = 0;
         }
       }
+
+      p.standingType = null;
+      if (p.standingIdx >= 0) {
+        const pl = platforms[p.standingIdx];
+        p.standingType = pl.type;
+        if (!wasGrounded && prevVy >= CATS_IMPACT_VY) impactIds.add(p.id);
+        if (pl.type === 'crumble' && !pl.broken) {
+          pl.standTicks = Math.min(CATS_CRUMBLE_DELAY + 4, pl.standTicks + 2);
+          if (pl.standTicks > CATS_CRUMBLE_DELAY) {
+            pl.broken = true;
+            pl.respawnTimer = CATS_CRUMBLE_RESPAWN;
+          }
+        }
+        if (pl.type === 'bounce') {
+          p.vy = CATS_BOUNCE_V;
+          p.grounded = false;
+        }
+        if (pl.type === 'pitfloor' && !p.trapped) {
+          p.trapped = true;
+          p.trappedPitIdx = p.standingIdx;
+          p.vx = 0;
+          p.vy = 0;
+        }
+      }
     }
 
     for (let iter = 0; iter < 2; iter++) {
       for (let i = 0; i < ids.length - 1; i++) {
         const a = this.players.get(ids[i]);
         const b = this.players.get(ids[i + 1]);
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const dist = Math.hypot(dx, dy) || 0.0001;
-        if (dist > ROPE_LENGTH) {
-          const diff = (dist - ROPE_LENGTH) / dist / 2;
-          const offX = dx * diff;
-          const offY = dy * diff;
-          a.x += offX; a.y += offY;
-          b.x -= offX; b.y -= offY;
+        if (a.trapped && !b.trapped) {
+          if (b.x > a.x + ROPE_LENGTH) b.x = a.x + ROPE_LENGTH;
+          else if (b.x < a.x - ROPE_LENGTH) b.x = a.x - ROPE_LENGTH;
+        } else if (b.trapped && !a.trapped) {
+          if (a.x > b.x + ROPE_LENGTH) a.x = b.x + ROPE_LENGTH;
+          else if (a.x < b.x - ROPE_LENGTH) a.x = b.x - ROPE_LENGTH;
+        } else if (!a.trapped && !b.trapped) {
+          const dx = b.x - a.x;
+          if (Math.abs(dx) > ROPE_LENGTH) {
+            const half = (Math.abs(dx) - ROPE_LENGTH) / 2 * Math.sign(dx);
+            a.x += half; b.x -= half;
+          }
         }
       }
     }
 
+    // آلية الإنقاذ والسحب
+    const rescueEvents = [];
+    for (const pit of this.pitState) {
+      const pl = platforms[pit.idx];
+      const trappedIds = ids.filter((id) => {
+        const p = this.players.get(id);
+        return p.trapped && p.trappedPitIdx === pit.idx;
+      });
+      const pullerIds = trappedIds.length
+        ? ids.filter((id) => {
+            const p = this.players.get(id);
+            if (p.trapped || !p.pulling || !p.grounded) return false;
+            return trappedIds.some((tid) => {
+              const t = this.players.get(tid);
+              return Math.abs(p.x - t.x) < CATS_PULL_RANGE;
+            });
+          })
+        : [];
+
+      if (trappedIds.length === 0) {
+        pit.rescueProgress = 0;
+        pit.dragProgress = 0;
+        continue;
+      }
+
+      if (pullerIds.length >= trappedIds.length) {
+        pit.rescueProgress++;
+        pit.dragProgress = Math.max(0, pit.dragProgress - 2);
+        if (pit.rescueProgress >= CATS_PULL_SUCCESS_TICKS) {
+          trappedIds.forEach((tid, i) => {
+            const t = this.players.get(tid);
+            t.trapped = false;
+            t.trappedPitIdx = -1;
+            t.vy = -10;
+            t.grounded = false;
+            t.x = pl.exitX + i * 20;
+            t.y = pl.exitY;
+          });
+          pit.rescueProgress = 0;
+          pit.dragProgress = 0;
+          rescueEvents.push({ success: true });
+        }
+      } else if (pullerIds.length > 0) {
+        pit.dragProgress++;
+        pit.rescueProgress = Math.max(0, pit.rescueProgress - 1);
+        if (pit.dragProgress >= CATS_DRAG_IN_TICKS) {
+          for (const pid of pullerIds) {
+            const puller = this.players.get(pid);
+            puller.trapped = true;
+            puller.trappedPitIdx = pit.idx;
+            puller.vx = 0;
+            puller.vy = 0;
+            puller.x = pl.x + pl.w / 2 - CAT_W / 2;
+            puller.y = pl.y + 4;
+          }
+          pit.dragProgress = 0;
+          rescueEvents.push({ success: false, dragged: true });
+        }
+      } else {
+        pit.rescueProgress = Math.max(0, pit.rescueProgress - 1);
+        pit.dragProgress = Math.max(0, pit.dragProgress - 1);
+      }
+    }
+    for (const ev of rescueEvents) this.broadcast({ type: 'rescue', ...ev });
+
     let needReset = false;
     for (const id of ids) {
       const p = this.players.get(id);
+      if (p.trapped) continue;
       const rect = { x: p.x, y: p.y, w: CAT_W, h: CAT_H };
       if (p.y > CATS_WORLD_H) needReset = true;
       for (const s of CATS_SPIKES) {
@@ -843,7 +1079,12 @@ export class GameRoom {
       });
       this.yarns = this.yarns.filter((y) => {
         const hit = Math.abs(p.x + CAT_W / 2 - y.x) < 22 && Math.abs(p.y + CAT_H / 2 - y.y) < 22;
-        if (hit) this.score++;
+        if (hit) {
+          if (tick - this.lastYarnTick <= CATS_COMBO_WINDOW_TICKS) this.combo++;
+          else this.combo = 1;
+          this.lastYarnTick = tick;
+          this.score += this.combo;
+        }
         return !hit;
       });
     }
@@ -856,6 +1097,8 @@ export class GameRoom {
         p.vx = 0;
         p.vy = 0;
         p.grounded = false;
+        p.trapped = false;
+        p.trappedPitIdx = -1;
       });
       this.broadcast({ type: 'hazard' });
     }
@@ -865,10 +1108,16 @@ export class GameRoom {
       mode: 'cats',
       players: ids.map((id) => {
         const p = this.players.get(id);
-        return { id: p.id, x: p.x, y: p.y, grounded: p.grounded, facing: p.facing };
+        return {
+          id: p.id, x: p.x, y: p.y, grounded: p.grounded, facing: p.facing,
+          trapped: p.trapped, impact: impactIds.has(p.id),
+        };
       }),
+      platforms,
       yarns: this.yarns,
       score: this.score,
+      combo: this.combo,
+      pits: this.pitState.map((pit) => ({ idx: pit.idx, rescueProgress: pit.rescueProgress, dragProgress: pit.dragProgress })),
     });
 
     const allFinished = ids.every((id) => this.players.get(id).x >= CATS_FINISH_X);
